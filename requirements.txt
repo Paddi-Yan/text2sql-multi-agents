@@ -1,0 +1,38 @@
+# Core dependencies
+openai>=1.0.0
+langchain>=0.1.0
+langgraph>=0.1.0
+
+# Vector database
+pymilvus>=2.3.0
+
+# Caching
+redis>=5.0.0
+
+# Database connectivity
+psycopg2-binary>=2.9.0
+mysql-connector-python>=8.0.0
+cx-Oracle>=8.0.0
+sqlparse>=0.4.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Monitoring and logging
+prometheus-client>=0.17.0
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+
+# Security
+cryptography>=41.0.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+
+# Development
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
