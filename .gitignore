@@ -89,3 +89,5 @@ config/local_settings.py
 # Temporary files
 *.tmp
 *.temp
+
+.kiro/**
