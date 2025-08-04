@@ -90,4 +90,5 @@ config/local_settings.py
 *.tmp
 *.temp
 
-.kiro/**
+# Kiro IDE files
+.kiro/
