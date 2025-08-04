@@ -23,6 +23,100 @@ class ChatMessage:
     fixed: bool = False
     execution_result: Optional[Dict] = None
     chosen_db_schema_dict: Optional[Dict] = None
+    
+    # Enhanced fields for better message tracking and routing
+    message_id: str = field(default_factory=lambda: str(id(object())))
+    timestamp: datetime = field(default_factory=datetime.now)
+    sender: str = "System"
+    priority: int = 1  # 1=low, 2=normal, 3=high, 4=urgent
+    retry_count: int = 0
+    max_retries: int = 3
+    context: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def copy(self) -> 'ChatMessage':
+        """Create a copy of the message."""
+        import copy
+        return copy.deepcopy(self)
+    
+    def route_to(self, agent_name: str) -> 'ChatMessage':
+        """Create a copy of message routed to specific agent.
+        
+        Args:
+            agent_name: Target agent name
+            
+        Returns:
+            New message instance with updated routing
+        """
+        new_message = self.copy()
+        new_message.send_to = agent_name
+        new_message.sender = self.send_to if self.send_to != "System" else "System"
+        return new_message
+    
+    def add_context(self, key: str, value: Any) -> 'ChatMessage':
+        """Add context information to message.
+        
+        Args:
+            key: Context key
+            value: Context value
+            
+        Returns:
+            Self for method chaining
+        """
+        self.context[key] = value
+        return self
+    
+    def get_context(self, key: str, default: Any = None) -> Any:
+        """Get context value.
+        
+        Args:
+            key: Context key
+            default: Default value
+            
+        Returns:
+            Context value or default
+        """
+        return self.context.get(key, default)
+    
+    def increment_retry(self) -> bool:
+        """Increment retry count.
+        
+        Returns:
+            True if retry is allowed, False if max retries exceeded
+        """
+        self.retry_count += 1
+        return self.retry_count <= self.max_retries
+    
+    def is_high_priority(self) -> bool:
+        """Check if message has high priority.
+        
+        Returns:
+            True if priority is high or urgent
+        """
+        return self.priority >= 3
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert message to dictionary.
+        
+        Returns:
+            Dictionary representation of message
+        """
+        return {
+            "message_id": self.message_id,
+            "timestamp": self.timestamp.isoformat(),
+            "db_id": self.db_id,
+            "query": self.query,
+            "evidence": self.evidence,
+            "send_to": self.send_to,
+            "sender": self.sender,
+            "priority": self.priority,
+            "retry_count": self.retry_count,
+            "final_sql": self.final_sql,
+            "pruned": self.pruned,
+            "fixed": self.fixed,
+            "context": self.context,
+            "metadata": self.metadata
+        }
 
 
 @dataclass
