@@ -5,6 +5,14 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not installed, skip loading .env file
+    pass
+
 
 @dataclass
 class LLMConfig:
@@ -23,11 +31,13 @@ class LLMConfig:
 @dataclass
 class DatabaseConfig:
     """Database connection configuration."""
-    host: str = "localhost"
-    port: int = 5432
-    username: Optional[str] = None
-    password: Optional[str] = None
-    database: Optional[str] = None
+    host: str = "127.0.0.1"
+    port: int = 3306
+    username: Optional[str] = "root"
+    password: Optional[str] = "123456"
+    database: Optional[str] = "text2sql_db"
+    driver: str = "mysql+pymysql"
+    charset: str = "utf8mb4"
     
     def __post_init__(self):
         self.host = os.getenv("DB_HOST", self.host)
@@ -35,6 +45,11 @@ class DatabaseConfig:
         self.username = os.getenv("DB_USER", self.username)
         self.password = os.getenv("DB_PASSWORD", self.password)
         self.database = os.getenv("DB_NAME", self.database)
+    
+    @property
+    def connection_string(self) -> str:
+        """Get database connection string."""
+        return f"{self.driver}://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}?charset={self.charset}"
 
 
 @dataclass

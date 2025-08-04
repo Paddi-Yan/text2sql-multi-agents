@@ -12,8 +12,12 @@ redis>=5.0.0
 # Database connectivity
 psycopg2-binary>=2.9.0
 mysql-connector-python>=8.0.0
+PyMySQL>=1.1.0
 cx-Oracle>=8.0.0
 sqlparse>=0.4.0
+
+# Environment variables
+python-dotenv>=1.0.0
 
 # Data processing
 pandas>=2.0.0
