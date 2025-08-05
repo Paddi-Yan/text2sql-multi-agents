@@ -267,9 +267,72 @@ class CustomAgent:
         return response
 ```
 
+### 8. LangGraph工作流编排使用
+
+```python
+from services.workflow import (
+    initialize_state,
+    selector_node,
+    decomposer_node,
+    refiner_node,
+    should_continue,
+    finalize_state,
+    Text2SQLState
+)
+
+# 初始化工作流状态
+state = initialize_state(
+    db_id="ecommerce_db",
+    query="显示每个分类中销量最高的产品及其详细信息",
+    evidence="需要关联产品表和销售表进行统计分析",
+    max_retries=3
+)
+
+# 执行工作流
+while not state['finished']:
+    if state['current_agent'] == 'Selector':
+        state = selector_node(state)
+        print(f"✅ Selector完成: 模式裁剪={state['pruned']}")
+        
+    elif state['current_agent'] == 'Decomposer':
+        state = decomposer_node(state)
+        print(f"✅ Decomposer完成: SQL={state['final_sql'][:50]}...")
+        
+    elif state['current_agent'] == 'Refiner':
+        state = refiner_node(state)
+        if state['is_correct']:
+            print(f"✅ Refiner完成: SQL执行成功")
+        else:
+            print(f"❌ Refiner失败: {state['error_message']}")
+    
+    # 检查是否继续
+    next_step = should_continue(state)
+    if next_step == "end":
+        break
+
+# 完成处理
+final_state = finalize_state(state)
+
+# 输出结果
+if final_state['success']:
+    result = final_state['result']
+    print(f"🎉 处理成功!")
+    print(f"最终SQL: {result['sql']}")
+    print(f"执行时间: {result['processing_time']:.2f}秒")
+    print(f"结果行数: {len(result['execution_result']['data'])}")
+else:
+    print(f"❌ 处理失败: {final_state['result']['error']}")
+
+# 查看各智能体执行时间
+execution_times = final_state['agent_execution_times']
+print(f"执行时间分布:")
+for agent, time_spent in execution_times.items():
+    print(f"  {agent}: {time_spent:.2f}秒")
+```
+
 ## 完整示例
 
-### 端到端查询处理
+### 端到端查询处理（传统方式）
 
 ```python
 import asyncio
@@ -336,6 +399,99 @@ async def process_query():
 
 # 运行示例
 asyncio.run(process_query())
+```
+
+### 端到端查询处理（LangGraph工作流方式）
+
+```python
+from services.workflow import (
+    initialize_state, selector_node, decomposer_node, 
+    refiner_node, should_continue, finalize_state
+)
+
+def process_query_with_workflow():
+    """使用LangGraph工作流处理查询"""
+    
+    # 初始化状态
+    state = initialize_state(
+        db_id="ecommerce_db",
+        query="显示每个分类中销量最高的产品及其详细信息",
+        evidence="需要关联产品表和销售表进行统计分析",
+        max_retries=3
+    )
+    
+    print(f"🚀 开始处理查询: {state['query']}")
+    
+    # 执行工作流
+    step = 1
+    while not state['finished']:
+        print(f"\n--- 步骤 {step}: {state['current_agent']} ---")
+        
+        if state['current_agent'] == 'Selector':
+            state = selector_node(state)
+            if state['current_agent'] != 'Error':
+                print(f"✅ Selector完成: 模式裁剪={state['pruned']}")
+                print(f"   处理阶段: {state['processing_stage']}")
+                
+        elif state['current_agent'] == 'Decomposer':
+            state = decomposer_node(state)
+            if state['current_agent'] != 'Error':
+                print(f"✅ Decomposer完成: SQL生成")
+                print(f"   生成的SQL: {state['final_sql'][:100]}...")
+                print(f"   处理阶段: {state['processing_stage']}")
+                
+        elif state['current_agent'] == 'Refiner':
+            state = refiner_node(state)
+            if state['is_correct']:
+                print(f"✅ Refiner完成: SQL执行成功")
+            else:
+                print(f"❌ Refiner: SQL执行失败")
+                if state['retry_count'] < state['max_retries']:
+                    print(f"   准备重试 ({state['retry_count']}/{state['max_retries']})")
+                else:
+                    print(f"   已达到最大重试次数")
+        
+        # 检查是否继续
+        next_step = should_continue(state)
+        if next_step == "end":
+            break
+            
+        step += 1
+        if step > 10:  # 防止无限循环
+            print("⚠️ 达到最大步骤限制")
+            break
+    
+    # 完成处理
+    final_state = finalize_state(state)
+    
+    # 输出最终结果
+    print(f"\n{'='*50}")
+    if final_state['success']:
+        result = final_state['result']
+        print(f"🎉 处理成功!")
+        print(f"最终SQL: {result['sql']}")
+        print(f"总处理时间: {result.get('total_processing_time', 0):.2f}秒")
+        if result.get('execution_result'):
+            data = result['execution_result'].get('data', [])
+            print(f"结果行数: {len(data)}")
+    else:
+        result = final_state['result']
+        print(f"❌ 处理失败: {result.get('error', '未知错误')}")
+        if result.get('failed_sql'):
+            print(f"失败的SQL: {result['failed_sql']}")
+    
+    # 显示各智能体执行时间
+    execution_times = final_state.get('agent_execution_times', {})
+    if execution_times:
+        print(f"\n执行时间分布:")
+        for agent, time_spent in execution_times.items():
+            print(f"  {agent.capitalize()}: {time_spent:.2f}秒")
+    
+    return final_state
+
+# 运行示例
+if __name__ == "__main__":
+    final_state = process_query_with_workflow()
 ```
 
 ## 配置调优

@@ -56,9 +56,13 @@ This system uniquely integrates two proven approaches:
 - **提示词管理系统**: 集中化的提示词模板管理，支持参数化和动态格式化
 - **通信协议**: 高级智能体间通信，支持优先级队列和会话管理
 
-### 🚧 开发中功能
+### ✅ LangGraph工作流编排系统
 
-- **LangGraph工作流**: 智能体编排和状态管理（规划中）
+- **工作流状态管理**: 完整的Text2SQLState状态定义，支持智能体间数据传递
+- **节点函数实现**: Selector、Decomposer、Refiner三个核心节点函数
+- **条件路由逻辑**: 智能的工作流路径决策和重试机制
+- **状态初始化和完成**: 完整的工作流生命周期管理
+- **错误处理和监控**: 内置的异常处理和执行时间统计
 
 ## Architecture
 
@@ -128,7 +132,8 @@ python -m services.chat_manager
 ├── services/              # 核心业务服务
 │   ├── training_service.py        # Vanna.ai式训练服务
 │   ├── enhanced_rag_retriever.py  # 增强型RAG检索器
-│   └── llm_service.py             # 统一LLM调用服务
+│   ├── llm_service.py             # 统一LLM调用服务
+│   └── workflow.py                # LangGraph工作流编排系统
 ├── storage/               # 数据访问层
 │   └── vector_store.py    # 向量数据库操作
 ├── utils/                 # 共享工具和模型
@@ -198,6 +203,15 @@ python -m services.chat_manager
 - **错误处理**: 完善的异常处理和响应包装机制
 - **架构优化**: 组件间采用松耦合设计，支持依赖注入和统一日志管理
 
+### LangGraph工作流编排系统 (services/workflow.py)
+
+- **状态管理**: 完整的Text2SQLState状态定义，包含所有智能体间的数据传递信息
+- **节点函数**: 实现Selector、Decomposer、Refiner三个核心智能体的节点函数
+- **条件路由**: 智能的工作流路径决策，支持重试机制和错误处理
+- **生命周期管理**: 完整的工作流初始化、执行和完成流程
+- **监控统计**: 内置执行时间统计、token使用量跟踪和性能监控
+- **错误恢复**: 支持智能重试、降级处理和异常恢复机制
+
 ### 提示词管理系统 (utils/prompts.py)
 
 - **集中化管理**: 统一管理所有智能体的提示词模板
@@ -237,10 +251,12 @@ python -m services.chat_manager
 - [增强型RAG检索示例](examples/enhanced_rag_retriever_example.py) - RAG检索功能演示
 - [训练服务示例](examples/vanna_training_service_example.py) - 训练系统使用演示
 - [LLM集成测试示例](examples/test_llm_integration.py) - LLM服务集成测试
+- [LangGraph工作流示例](examples/workflow_example.py) - 工作流编排系统使用演示
 
 ### 技术文档
 
 - [提示词管理系统文档](docs/prompts_system.md) - 集中化提示词管理详细说明
+- [LangGraph工作流文档](docs/langgraph_workflow.md) - 工作流编排系统详细说明
 
 ## License
 
