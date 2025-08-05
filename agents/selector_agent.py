@@ -1,31 +1,28 @@
 """
 Selector Agent for database schema understanding and dynamic pruning.
-Based on MAC-SQL strategy with intelligent schema selection.
+LLM-powered intelligent schema selection and pruning.
 """
 import json
-import re
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
-try:
-    import tiktoken
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
 
 from agents.base_agent import BaseAgent
 from utils.models import ChatMessage, AgentResponse, DatabaseInfo, DatabaseStats
 from storage.mysql_adapter import MySQLAdapter
+from services.llm_service import llm_service
+from utils.prompts import (
+    get_selector_schema_analysis_prompt,
+    get_selector_pruning_prompt
+)
 
 
 @dataclass
 class SchemaPruningConfig:
-    """Configuration for schema pruning strategy."""
-    token_limit: int = 25000
-    avg_column_threshold: int = 6
-    total_column_threshold: int = 30
+    """Configuration for LLM-based schema pruning strategy."""
+    complexity_threshold: int = 5  # 1-10 scale
     max_tables_per_query: int = 10
-    enable_foreign_key_analysis: bool = True
-    enable_semantic_pruning: bool = True
+    enable_llm_analysis: bool = True
+    fallback_to_simple: bool = True
 
 
 class DatabaseSchemaManager:
@@ -35,27 +32,7 @@ class DatabaseSchemaManager:
         self.db2infos: Dict[str, DatabaseInfo] = {}
         self.db2dbjsons: Dict[str, Dict] = {}
         self.db2stats: Dict[str, DatabaseStats] = {}
-        self._tokenizer = None
         self.mysql_adapter = MySQLAdapter()
-    
-    def get_tokenizer(self):
-        """Get or create tokenizer for token counting."""
-        if self._tokenizer is None and TIKTOKEN_AVAILABLE:
-            try:
-                self._tokenizer = tiktoken.get_encoding("cl100k_base")
-            except Exception:
-                # Fallback to simple word counting
-                self._tokenizer = None
-        return self._tokenizer
-    
-    def count_tokens(self, text: str) -> int:
-        """Count tokens in text."""
-        tokenizer = self.get_tokenizer()
-        if tokenizer:
-            return len(tokenizer.encode(text))
-        else:
-            # Fallback: approximate token count as word count * 1.3
-            return int(len(text.split()) * 1.3)
     
     def scan_mysql_database_schema(self, db_name: str, db_id: str) -> DatabaseInfo:
         """Scan MySQL database schema information.
@@ -251,192 +228,126 @@ class DatabaseSchemaManager:
         return self.db2dbjsons.get(db_id)
 
 
-class SchemaPruner:
-    """Handles intelligent schema pruning based on query relevance."""
+class LLMSchemaPruner:
+    """LLM-powered intelligent schema pruning based on query relevance."""
     
     def __init__(self, config: SchemaPruningConfig):
         self.config = config
+        import logging
+        self.logger = logging.getLogger(f"{__name__}.LLMSchemaPruner")
     
-    def is_need_prune(self, db_stats: DatabaseStats, schema_text: str) -> bool:
-        """Determine if schema pruning is needed.
+    def analyze_schema_complexity(self, db_id: str, schema_text: str, db_stats: DatabaseStats) -> Dict[str, Any]:
+        """Use LLM to analyze schema complexity and determine if pruning is needed.
         
         Args:
-            db_stats: Database statistics
+            db_id: Database identifier
             schema_text: Full schema description text
+            db_stats: Database statistics
             
         Returns:
-            True if pruning is recommended
+            Dictionary with analysis results
         """
-        # Check column count thresholds - if either threshold is exceeded, need pruning
-        if (db_stats.avg_column_count > self.config.avg_column_threshold or 
-            db_stats.total_column_count > self.config.total_column_threshold):
-            return True
+        if not self.config.enable_llm_analysis:
+            return self._simple_complexity_analysis(db_stats)
         
-        # Check token count
-        schema_manager = DatabaseSchemaManager()
-        token_count = schema_manager.count_tokens(schema_text)
-        
-        return token_count >= self.config.token_limit
+        try:
+            # Get LLM analysis prompt
+            system_prompt, user_prompt = get_selector_schema_analysis_prompt(
+                db_id=db_id,
+                schema_info=schema_text,
+                table_count=db_stats.table_count,
+                total_columns=db_stats.total_column_count,
+                avg_columns=db_stats.avg_column_count
+            )
+            
+            # Call LLM for analysis
+            response = llm_service.generate_completion(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=0.1,
+                max_tokens=1000
+            )
+            
+            if response.success:
+                # Parse JSON response
+                analysis_data = llm_service.extract_json_from_response(response.content)
+                if analysis_data:
+                    return analysis_data
+            
+            # Fallback to simple analysis
+            return self._simple_complexity_analysis(db_stats)
+            
+        except Exception as e:
+            self.logger.warning(f"LLM schema analysis failed: {e}, using simple fallback")
+            return self._simple_complexity_analysis(db_stats)
     
-    def prune_schema(self, query: str, db_info: DatabaseInfo, db_stats: DatabaseStats) -> Dict[str, Any]:
-        """Prune schema based on query relevance.
+    def prune_schema_with_llm(self, query: str, schema_text: str, fk_info: str, evidence: str = "") -> Dict[str, Any]:
+        """Use LLM to prune schema based on query relevance.
         
         Args:
             query: Natural language query
-            db_info: Database information
-            db_stats: Database statistics
+            schema_text: Full schema description text
+            fk_info: Foreign key relationships
+            evidence: Additional context
             
         Returns:
             Dictionary with pruning decisions for each table
         """
-        pruning_result = {}
-        query_lower = query.lower()
+        if not self.config.enable_llm_analysis:
+            return {}
         
-        # Extract potential table/column references from query
-        query_keywords = self._extract_query_keywords(query_lower)
-        
-        for table_name, columns in db_info.desc_dict.items():
-            table_relevance = self._calculate_table_relevance(
-                table_name, columns, query_keywords, db_info.fk_dict.get(table_name, [])
+        try:
+            # Get LLM pruning prompt
+            system_prompt, user_prompt = get_selector_pruning_prompt(
+                query=query,
+                schema_info=schema_text,
+                fk_info=fk_info,
+                evidence=evidence
             )
             
-            if table_relevance["is_irrelevant"]:
-                pruning_result[table_name] = "drop_all"
-            elif len(columns) <= 10:  # Keep small tables intact
-                pruning_result[table_name] = "keep_all"
-            else:
-                # Select most relevant columns
-                relevant_columns = self._select_relevant_columns(
-                    columns, query_keywords, max_columns=self.config.avg_column_threshold
-                )
-                pruning_result[table_name] = relevant_columns
-        
-        return pruning_result
+            # Call LLM for pruning decisions
+            response = llm_service.generate_completion(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=0.1,
+                max_tokens=2000
+            )
+            
+            if response.success:
+                # Parse JSON response
+                pruning_data = llm_service.extract_json_from_response(response.content)
+                if pruning_data and "pruning_decisions" in pruning_data:
+                    return pruning_data["pruning_decisions"]
+            
+            # Fallback: no pruning
+            return {}
+            
+        except Exception as e:
+            self.logger.warning(f"LLM schema pruning failed: {e}, using no pruning")
+            return {}
     
-    def _extract_query_keywords(self, query: str) -> Dict[str, List[str]]:
-        """Extract keywords that might reference tables or columns."""
-        # Common SQL-related keywords to look for
-        keywords = {
-            "entities": [],  # Potential table names
-            "attributes": [],  # Potential column names
-            "operations": [],  # Operations like count, sum, etc.
-            "conditions": []  # Filtering conditions
-        }
+    def _simple_complexity_analysis(self, db_stats: DatabaseStats) -> Dict[str, Any]:
+        """Simple rule-based complexity analysis as fallback."""
+        complexity_score = 1
         
-        # Extract potential entity names (nouns)
-        entity_patterns = [
-            r'\b(user|users|customer|customers|order|orders|product|products|item|items)\b',
-            r'\b(person|people|account|accounts|transaction|transactions)\b',
-            r'\b(company|companies|employee|employees|department|departments)\b'
-        ]
+        # Basic complexity scoring
+        if db_stats.table_count > 10:
+            complexity_score += 2
+        if db_stats.avg_column_count > 8:
+            complexity_score += 2
+        if db_stats.total_column_count > 50:
+            complexity_score += 3
         
-        for pattern in entity_patterns:
-            matches = re.findall(pattern, query)
-            keywords["entities"].extend(matches)
-        
-        # Extract potential attribute names
-        attribute_patterns = [
-            r'\b(name|id|email|phone|address|age|date|time|price|amount|quantity)\b',
-            r'\b(status|type|category|description|title|code|number)\b'
-        ]
-        
-        for pattern in attribute_patterns:
-            matches = re.findall(pattern, query)
-            keywords["attributes"].extend(matches)
-        
-        # Extract operations
-        operation_patterns = [
-            r'\b(count|sum|average|max|min|total|show|list|find|get)\b'
-        ]
-        
-        for pattern in operation_patterns:
-            matches = re.findall(pattern, query)
-            keywords["operations"].extend(matches)
-        
-        return keywords
-    
-    def _calculate_table_relevance(self, table_name: str, columns: List[Tuple], 
-                                 query_keywords: Dict[str, List[str]], 
-                                 foreign_keys: List[Tuple]) -> Dict[str, Any]:
-        """Calculate relevance score for a table."""
-        relevance_score = 0
-        table_lower = table_name.lower()
-        
-        # Check if table name matches query entities
-        for entity in query_keywords["entities"]:
-            if entity in table_lower or table_lower in entity:
-                relevance_score += 10
-        
-        # Check column name matches
-        column_matches = 0
-        for col_name, col_type, _ in columns:
-            col_lower = col_name.lower()
-            for attr in query_keywords["attributes"]:
-                if attr in col_lower or col_lower in attr:
-                    column_matches += 1
-                    relevance_score += 5
-        
-        # Check foreign key relationships
-        if self.config.enable_foreign_key_analysis:
-            for fk in foreign_keys:
-                if fk[1].lower() in [e.lower() for e in query_keywords["entities"]]:
-                    relevance_score += 3
-        
-        # Determine if table is irrelevant
-        is_irrelevant = (relevance_score == 0 and 
-                        len(query_keywords["entities"]) > 0 and 
-                        not any(entity in table_lower for entity in query_keywords["entities"]))
+        needs_pruning = complexity_score >= self.config.complexity_threshold
         
         return {
-            "score": relevance_score,
-            "column_matches": column_matches,
-            "is_irrelevant": is_irrelevant
+            "needs_pruning": needs_pruning,
+            "complexity_score": min(complexity_score, 10),
+            "token_estimate": db_stats.total_column_count * 20,  # Rough estimate
+            "pruning_strategy": "llm_based" if needs_pruning else "no_pruning",
+            "key_tables": [],  # Would need more analysis
+            "reasoning": f"Simple analysis: {complexity_score}/10 complexity score"
         }
-    
-    def _select_relevant_columns(self, columns: List[Tuple], 
-                               query_keywords: Dict[str, List[str]], 
-                               max_columns: int = 6) -> List[str]:
-        """Select most relevant columns for a table."""
-        column_scores = []
-        
-        for col_name, col_type, _ in columns:
-            score = 0
-            col_lower = col_name.lower()
-            
-            # Primary key columns are always important
-            if "id" in col_lower:
-                score += 10
-            
-            # Match with query attributes
-            for attr in query_keywords["attributes"]:
-                if attr in col_lower or col_lower in attr:
-                    score += 8
-            
-            # Common important columns
-            important_cols = ["name", "title", "status", "type", "date", "time", "amount", "price"]
-            for imp_col in important_cols:
-                if imp_col in col_lower:
-                    score += 5
-            
-            # Prefer shorter column names (often more important)
-            if len(col_name) <= 10:
-                score += 2
-            
-            column_scores.append((col_name, score))
-        
-        # Sort by score and select top columns
-        column_scores.sort(key=lambda x: x[1], reverse=True)
-        selected_columns = [col[0] for col in column_scores[:max_columns]]
-        
-        # Always include ID columns if present
-        for col_name, _, _ in columns:
-            if "id" in col_name.lower() and col_name not in selected_columns:
-                selected_columns.append(col_name)
-                if len(selected_columns) > max_columns:
-                    selected_columns = selected_columns[:max_columns]
-                break
-        
-        return selected_columns
 
 
 class SelectorAgent(BaseAgent):
@@ -455,7 +366,7 @@ class SelectorAgent(BaseAgent):
         self.tables_json_path = tables_json_path
         self.schema_manager = DatabaseSchemaManager()
         self.pruning_config = SchemaPruningConfig()
-        self.schema_pruner = SchemaPruner(self.pruning_config)
+        self.schema_pruner = LLMSchemaPruner(self.pruning_config)
         
         # Performance tracking
         self.pruning_stats = {
@@ -491,20 +402,33 @@ class SelectorAgent(BaseAgent):
             # Generate full schema description
             desc_str, fk_str = self._get_db_desc_str(message.db_id, None)
             
-            # Determine if pruning is needed
-            need_prune = self._is_need_prune(message.db_id, desc_str)
+            # Use LLM to analyze schema complexity and determine pruning needs
+            complexity_analysis = self.schema_pruner.analyze_schema_complexity(
+                message.db_id, desc_str, db_stats
+            )
+            
+            need_prune = complexity_analysis.get("needs_pruning", False)
             
             if need_prune:
-                # Perform schema pruning
-                pruning_result = self._prune(message.db_id, message.query, desc_str)
+                # Perform LLM-based schema pruning
+                pruning_result = self.schema_pruner.prune_schema_with_llm(
+                    query=message.query,
+                    schema_text=desc_str,
+                    fk_info=fk_str,
+                    evidence=message.evidence
+                )
                 
-                # Generate pruned schema description
-                desc_str, fk_str = self._get_db_desc_str(message.db_id, pruning_result)
-                message.pruned = True
-                message.chosen_db_schema_dict = pruning_result
-                
-                self.pruning_stats["pruned_queries"] += 1
-                self.logger.info(f"Schema pruned for query: {message.query[:50]}...")
+                if pruning_result:
+                    # Generate pruned schema description
+                    desc_str, fk_str = self._get_db_desc_str(message.db_id, pruning_result)
+                    message.pruned = True
+                    message.chosen_db_schema_dict = pruning_result
+                    
+                    self.pruning_stats["pruned_queries"] += 1
+                    self.logger.info(f"Schema pruned for query: {message.query[:50]}...")
+                else:
+                    message.pruned = False
+                    self.logger.info(f"LLM pruning returned no results, keeping full schema")
             else:
                 message.pruned = False
                 self.logger.info(f"No pruning needed for query: {message.query[:50]}...")
@@ -701,40 +625,7 @@ class SelectorAgent(BaseAgent):
         
         return desc_str, fk_str
     
-    def _is_need_prune(self, db_id: str, db_schema: str) -> bool:
-        """Determine if schema pruning is needed.
-        
-        Args:
-            db_id: Database identifier
-            db_schema: Full database schema description
-            
-        Returns:
-            True if pruning is recommended
-        """
-        db_stats = self.schema_manager.get_database_stats(db_id)
-        if not db_stats:
-            return False
-        
-        return self.schema_pruner.is_need_prune(db_stats, db_schema)
-    
-    def _prune(self, db_id: str, query: str, db_schema: str) -> Dict[str, Any]:
-        """Perform schema pruning based on query relevance.
-        
-        Args:
-            db_id: Database identifier
-            query: Natural language query
-            db_schema: Full database schema description
-            
-        Returns:
-            Dictionary with pruning decisions for each table
-        """
-        db_info = self.schema_manager.get_database_info(db_id)
-        db_stats = self.schema_manager.get_database_stats(db_id)
-        
-        if not db_info or not db_stats:
-            return {}
-        
-        return self.schema_pruner.prune_schema(query, db_info, db_stats)
+
     
     def get_pruning_stats(self) -> Dict[str, Any]:
         """Get schema pruning statistics.

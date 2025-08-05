@@ -103,6 +103,123 @@ schema_info = "Table: users (id, name, email)"
 prompt = retriever.build_enhanced_prompt("显示所有用户", context, schema_info)
 ```
 
+### 4. LLM服务使用
+
+```python
+from services.llm_service import llm_service
+
+# 查询分解
+response = llm_service.decompose_query(
+    query="显示每个分类中销量最高的产品",
+    schema_info="# Table: products\n[id, name, category, price]\n# Table: sales\n[id, product_id, quantity]",
+    evidence="需要关联产品表和销售表"
+)
+
+if response.success:
+    json_result = llm_service.extract_json_from_response(response.content)
+    sub_questions = json_result.get("sub_questions", [])
+    print(f"分解的子问题: {sub_questions}")
+
+# SQL生成
+sql_response = llm_service.generate_sql(
+    query="显示所有活跃用户",
+    sub_questions=["显示所有活跃用户"],
+    schema_info="# Table: users\n[id, name, email, status]",
+    use_cot=False
+)
+
+if sql_response.success:
+    sql = llm_service.extract_sql_from_response(sql_response.content)
+    print(f"生成的SQL: {sql}")
+```
+
+### 5. Decomposer智能体使用
+
+```python
+from agents.decomposer_agent import DecomposerAgent
+from utils.models import ChatMessage
+
+# 创建Decomposer智能体
+decomposer = DecomposerAgent(
+    agent_name="MyDecomposer",
+    dataset_name="generic"  # 支持 "bird", "spider", "generic"
+)
+
+# 创建查询消息
+message = ChatMessage(
+    db_id="ecommerce_db",
+    query="显示每个分类中销量最高的产品及其详细信息",
+    desc_str="# Table: products\n[id, name, category, price]\n# Table: sales\n[id, product_id, quantity]",
+    fk_str="products.id = sales.product_id",
+    evidence="需要关联产品表和销售表进行统计分析"
+)
+
+# 处理查询
+response = decomposer.talk(message)
+
+if response.success:
+    print(f"生成的SQL: {response.message.final_sql}")
+    print(f"子问题数量: {response.metadata['sub_questions_count']}")
+    print(f"RAG增强: {response.metadata['rag_enhanced']}")
+    print(f"下一个智能体: {response.message.send_to}")
+else:
+    print(f"处理失败: {response.error}")
+
+# 获取统计信息
+stats = decomposer.get_decomposition_stats()
+print(f"总查询数: {stats['total_queries']}")
+print(f"复杂查询比例: {stats['complex_queries'] / stats['total_queries']:.2%}")
+print(f"RAG增强率: {stats['rag_enhancement_rate']:.2%}")
+```
+
+### 6. 提示词管理系统使用
+
+```python
+from utils.prompts import (
+    prompt_manager,
+    get_selector_schema_analysis_prompt,
+    get_decomposer_query_decomposition_prompt,
+    get_refiner_validation_prompt
+)
+
+# 基本使用
+template = prompt_manager.get_prompt("selector", "schema_analysis")
+system_prompt, user_prompt = prompt_manager.format_prompt(
+    "selector", "schema_analysis",
+    db_id="ecommerce_db",
+    schema_info="CREATE TABLE users...",
+    table_count=5,
+    total_columns=25,
+    avg_columns=5.0
+)
+
+# 便捷函数使用
+system_prompt, user_prompt = get_decomposer_query_decomposition_prompt(
+    query="显示所有活跃用户的订单信息",
+    schema_info="database schema",
+    evidence="additional context"
+)
+
+# 在智能体中集成
+class CustomAgent:
+    def process_query(self, query: str, schema_info: str):
+        system_prompt, user_prompt = get_selector_schema_analysis_prompt(
+            db_id="test_db",
+            schema_info=schema_info,
+            table_count=10,
+            total_columns=50,
+            avg_columns=5.0
+        )
+        
+        # 调用LLM服务
+        response = llm_service.generate_completion(
+            prompt=user_prompt,
+            system_prompt=system_prompt
+        )
+        
+        return response
+```
+
 ## 完整示例
 
 ### 端到端查询处理
@@ -110,6 +227,7 @@ prompt = retriever.build_enhanced_prompt("显示所有用户", context, schema_i
 ```python
 import asyncio
 from agents.selector_agent import SelectorAgent
+from agents.decomposer_agent import DecomposerAgent
 from agents.base_agent import MessageRouter
 from utils.models import ChatMessage
 
@@ -117,34 +235,38 @@ async def process_query():
     # 创建消息路由器
     router = MessageRouter()
     
-    # 创建Selector智能体
+    # 创建智能体
     selector = SelectorAgent("Selector", router=router)
+    decomposer = DecomposerAgent("Decomposer", dataset_name="generic", router=router)
     
     # 创建查询消息
     message = ChatMessage(
         db_id="ecommerce_db",
-        query="显示最近一个月活跃用户的订单统计信息",
+        query="显示每个分类中销量最高的产品及其详细信息",
         send_to="Selector"
     )
     
-    # 处理查询
+    # 步骤1: Selector处理
     response = selector.process_message(message)
     
     if response.success:
-        print("✅ 查询处理成功")
-        print(f"执行时间: {response.execution_time:.3f}s")
+        print("✅ Selector处理成功")
         print(f"模式是否裁剪: {response.message.pruned}")
         
-        # 显示智能体统计
-        stats = selector.get_stats()
-        print(f"智能体统计: 执行{stats['execution_count']}次, 成功率{stats['success_rate']:.2%}")
+        # 步骤2: Decomposer处理
+        decomposer_response = decomposer.process_message(response.message)
         
-        # 显示裁剪统计
-        pruning_stats = selector.get_pruning_stats()
-        print(f"裁剪统计: 总查询{pruning_stats['total_queries']}次, 裁剪{pruning_stats['pruned_queries']}次")
+        if decomposer_response.success:
+            print("✅ Decomposer处理成功")
+            print(f"生成的SQL: {decomposer_response.message.final_sql}")
+            print(f"子问题数量: {decomposer_response.metadata.get('sub_questions_count', 0)}")
+            print(f"RAG增强: {decomposer_response.metadata.get('rag_enhanced', False)}")
+            print(f"子问题列表: {decomposer_response.metadata.get('sub_questions', [])}")
+        else:
+            print(f"❌ Decomposer处理失败: {decomposer_response.error}")
         
     else:
-        print(f"❌ 查询处理失败: {response.error}")
+        print(f"❌ Selector处理失败: {response.error}")
 
 # 运行示例
 asyncio.run(process_query())
@@ -165,7 +287,27 @@ selector.update_pruning_config(
 )
 ```
 
-### 2. RAG检索器配置
+### 2. Decomposer智能体配置
+
+```python
+# 更新分解配置
+decomposer.update_config(
+    max_sub_questions=3,         # 限制子问题数量
+    enable_cot_reasoning=True,   # 启用CoT推理
+    enable_rag_enhancement=True, # 启用RAG增强
+    temperature=0.2              # 调整LLM温度
+)
+
+# 切换数据集类型
+decomposer.switch_dataset("bird")  # 或 "spider", "generic"
+
+# 设置RAG检索器
+from services.enhanced_rag_retriever import EnhancedRAGRetriever
+rag_retriever = EnhancedRAGRetriever(vector_store, embedding_service)
+decomposer.set_rag_retriever(rag_retriever)
+```
+
+### 3. RAG检索器配置
 
 ```python
 # 动态更新检索配置
@@ -267,5 +409,6 @@ A: 使用内置的统计功能，定期检查智能体和裁剪统计；集成�
 
 更多详细信息请参考：
 - [Selector智能体详细文档](selector_agent.md)
+- [提示词管理系统文档](prompts_system.md)
 - [测试和质量保证](testing_and_quality.md)
 - [项目示例代码](../examples/)

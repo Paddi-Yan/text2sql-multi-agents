@@ -40,12 +40,14 @@ This system uniquely integrates two proven approaches:
 
 - **BaseAgent基类**: 抽象基类和完整的消息传递机制
 - **Selector智能体**: MySQL数据库模式理解和智能裁剪，支持token限制优化
+- **Decomposer智能体**: 完整实现查询分解和SQL生成，支持CoT推理、多数据集适配和RAG增强
+- **LLM服务**: 统一的语言模型调用接口，支持查询分解和SQL生成
+- **提示词管理系统**: 集中化的提示词模板管理，支持参数化和动态格式化
 - **通信协议**: 高级智能体间通信，支持优先级队列和会话管理
 - **代码质量**: 持续的代码格式优化和注释改进，确保代码可读性和维护性
 
 ### 🚧 开发中功能
 
-- **Decomposer智能体**: 查询分解和SQL生成（规划中）
 - **Refiner智能体**: SQL执行验证和错误修正（规划中）
 - **LangGraph工作流**: 智能体编排和状态管理（规划中）
 
@@ -112,17 +114,20 @@ python -m services.chat_manager
 ├── agents/                 # 多智能体实现
 │   ├── base_agent.py      # 基础智能体抽象类和消息路由
 │   ├── selector_agent.py  # Selector智能体（数据库模式理解和裁剪）
+│   ├── decomposer_agent.py # Decomposer智能体（查询分解和SQL生成）
 │   └── communication.py   # 高级智能体间通信协议
 ├── services/              # 核心业务服务
 │   ├── training_service.py        # Vanna.ai式训练服务
-│   └── enhanced_rag_retriever.py  # 增强型RAG检索器
+│   ├── enhanced_rag_retriever.py  # 增强型RAG检索器
+│   └── llm_service.py             # 统一LLM调用服务
 ├── storage/               # 数据访问层
 │   └── vector_store.py    # 向量数据库操作
 ├── utils/                 # 共享工具和模型
 │   ├── models.py          # 核心数据模型
 │   ├── training_models.py # 训练数据模型
 │   ├── training_data_manager.py # 训练数据管理器
-│   └── vectorization.py   # 向量化工具
+│   ├── vectorization.py   # 向量化工具
+│   └── prompts.py         # 集中化提示词管理系统
 ├── config/               # 配置管理
 │   └── settings.py       # 应用配置
 ├── tests/                # 测试套件
@@ -155,6 +160,33 @@ python -m services.chat_manager
 - **多种检索策略**: 平衡、QA重点、SQL重点、上下文重点四种策略
 - **智能提示词生成**: 结构化、分层的提示词构建
 
+### Decomposer智能体 (agents/decomposer_agent.py)
+
+- **智能查询分解**: 自动分析查询复杂度，将复杂自然语言查询分解为逻辑子问题
+- **CoT推理**: 基于Chain of Thought的渐进式SQL生成，支持简单和复杂查询两种模式
+- **多数据集适配**: 支持BIRD、Spider、Generic等数据集，动态调整处理策略
+- **RAG增强**: 深度集成增强型RAG检索，利用历史示例和上下文提高生成质量
+- **LLM集成**: 与LLM服务深度集成，支持查询分解和SQL生成的智能化处理
+- **性能监控**: 完整的统计系统，包括查询复杂度分析、RAG增强率和成功率跟踪
+- **动态配置**: 支持运行时配置更新、数据集切换和RAG检索器设置
+
+### LLM服务 (services/llm_service.py)
+
+- **统一接口**: 标准化的LLM调用接口，支持多种模型
+- **查询分解**: 智能将复杂查询分解为子问题，支持JSON格式输出
+- **SQL生成**: 支持简单SQL生成和基于CoT的复杂SQL生成
+- **上下文集成**: 与RAG检索器深度集成，利用检索上下文增强生成质量
+- **错误处理**: 完善的异常处理和响应包装机制
+- **架构优化**: 组件间采用松耦合设计，支持依赖注入和统一日志管理
+
+### 提示词管理系统 (utils/prompts.py)
+
+- **集中化管理**: 统一管理所有智能体的提示词模板
+- **结构化模板**: 支持系统提示和用户提示的分离管理
+- **参数化支持**: 动态参数替换和模板格式化
+- **智能体专用**: 为Selector、Decomposer、Refiner等智能体提供专门的提示词
+- **便捷函数**: 提供常用提示词的快速访问接口
+
 ## 文档
 
 ### 快速开始
@@ -164,6 +196,9 @@ python -m services.chat_manager
 ### 核心组件文档
 
 - [Selector智能体详细文档](docs/selector_agent.md) - 数据库模式理解和智能裁剪
+- [Decomposer智能体详细文档](docs/decomposer_agent.md) - 查询分解和SQL生成
+- [LLM服务详细文档](docs/llm_service.md) - 统一语言模型调用接口
+- [Task 3.3 实现总结](docs/task_3_3_implementation_summary.md) - Decomposer智能体实现详情
 - [Task 3.2 实现总结](docs/task_3_2_implementation_summary.md) - Selector智能体实现详情
 - [Task 3.1 实现总结](docs/task_3_1_implementation_summary.md) - BaseAgent基类和消息传递
 - [Task 2.3 实现总结](docs/task_2_3_implementation_summary.md) - 增强型RAG检索系统
@@ -177,9 +212,15 @@ python -m services.chat_manager
 ### 使用示例
 
 - [Selector智能体示例](examples/selector_agent_example.py) - 完整的使用演示
+- [Decomposer智能体示例](examples/decomposer_agent_example.py) - 查询分解和SQL生成演示
 - [BaseAgent通信示例](examples/base_agent_communication_example.py) - 智能体间通信演示
 - [增强型RAG检索示例](examples/enhanced_rag_retriever_example.py) - RAG检索功能演示
 - [训练服务示例](examples/vanna_training_service_example.py) - 训练系统使用演示
+- [LLM集成测试示例](examples/test_llm_integration.py) - LLM服务集成测试
+
+### 技术文档
+
+- [提示词管理系统文档](docs/prompts_system.md) - 集中化提示词管理详细说明
 
 ## License
 
