@@ -208,11 +208,21 @@ class RefinerAgent(BaseAgent):
                     security_result=security_result
                 )
             
-            # Step 2: Execute SQL
+            # Step 2: LLM-based SQL validation (optional pre-validation)
+            validation_result = self._validate_sql_with_llm(message.final_sql, message)
+            if validation_result and not validation_result.get("is_valid", True):
+                self.logger.info("LLM validation detected potential issues, but proceeding with execution...")
+                # Log validation issues but don't block execution
+                for issue in validation_result.get("syntax_errors", []):
+                    self.logger.warning(f"Syntax issue detected: {issue}")
+                for issue in validation_result.get("logical_issues", []):
+                    self.logger.warning(f"Logical issue detected: {issue}")
+            
+            # Step 3: Execute SQL
             execution_result = self._execute_sql(message.final_sql, message.db_id)
             message.execution_result = execution_result.__dict__
             
-            # Step 3: Check if refinement is needed
+            # Step 4: Check if refinement is needed
             if self._is_need_refine(execution_result):
                 self.logger.info("SQL needs refinement, attempting to fix...")
                 
@@ -313,6 +323,90 @@ class RefinerAgent(BaseAgent):
         
         finally:
             result.execution_time = time.time() - start_time
+        
+        return result
+    
+    def _validate_sql_with_llm(self, sql: str, message: ChatMessage) -> Optional[Dict[str, Any]]:
+        """Validate SQL using LLM before execution.
+        
+        Args:
+            sql: SQL query to validate
+            message: Original message with context
+            
+        Returns:
+            Validation result dictionary or None if validation fails
+        """
+        self.validation_count += 1
+        
+        try:
+            # Get validation prompt
+            system_prompt, user_prompt = get_refiner_validation_prompt(
+                sql_query=sql,
+                schema_info=message.desc_str or "No schema information available",
+                original_query=message.query
+            )
+            
+            # Call LLM for validation
+            response = self.llm_service.generate_response(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.1,  # Low temperature for consistent validation
+                max_tokens=800
+            )
+            
+            if response and response.strip():
+                # Try to parse JSON response
+                import json
+                try:
+                    validation_result = json.loads(response.strip())
+                    self.logger.info(f"LLM validation completed: valid={validation_result.get('is_valid', True)}")
+                    return validation_result
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, try to extract key information
+                    self.logger.warning("Failed to parse LLM validation response as JSON")
+                    return self._parse_validation_response(response)
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error during LLM validation: {e}")
+            return None
+    
+    def _parse_validation_response(self, response: str) -> Dict[str, Any]:
+        """Parse non-JSON validation response.
+        
+        Args:
+            response: LLM response text
+            
+        Returns:
+            Parsed validation result
+        """
+        result = {
+            "is_valid": True,
+            "syntax_errors": [],
+            "logical_issues": [],
+            "security_concerns": [],
+            "suggestions": []
+        }
+        
+        response_lower = response.lower()
+        
+        # Check for validation indicators
+        if any(word in response_lower for word in ["invalid", "error", "incorrect", "wrong"]):
+            result["is_valid"] = False
+        
+        # Extract errors and suggestions (simple pattern matching)
+        lines = response.split('\n')
+        for line in lines:
+            line_lower = line.lower().strip()
+            if any(word in line_lower for word in ["syntax error", "syntax issue"]):
+                result["syntax_errors"].append(line.strip())
+            elif any(word in line_lower for word in ["logical", "logic"]):
+                result["logical_issues"].append(line.strip())
+            elif any(word in line_lower for word in ["security", "injection"]):
+                result["security_concerns"].append(line.strip())
+            elif any(word in line_lower for word in ["suggest", "recommend", "should"]):
+                result["suggestions"].append(line.strip())
         
         return result
     
@@ -448,7 +542,8 @@ class RefinerAgent(BaseAgent):
             "refinement_count": self.refinement_count,
             "security_violations": self.security_violations,
             "refinement_rate": self.refinement_count / self.execution_count if self.execution_count > 0 else 0.0,
-            "security_violation_rate": self.security_violations / self.validation_count if self.validation_count > 0 else 0.0
+            "security_violation_rate": self.security_violations / self.execution_count if self.execution_count > 0 else 0.0,
+            "llm_validation_rate": self.validation_count / self.execution_count if self.execution_count > 0 else 0.0
         }
         
         return {**base_stats, **refiner_stats}

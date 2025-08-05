@@ -132,14 +132,15 @@ def demonstrate_sql_execution():
         # Test cases
         test_cases = [
             {
-                "description": "Valid SQL query",
+                "description": "Valid SQL query with LLM validation",
                 "message": ChatMessage(
                     db_id="test",
                     query="Get all users with their ages",
                     final_sql="SELECT name, age FROM users",
                     desc_str="users table with columns: id, name, age, email, department_id"
                 ),
-                "expected_success": True
+                "expected_success": True,
+                "llm_validation_response": '{"is_valid": true, "suggestions": ["Query looks good"]}'
             },
             {
                 "description": "SQL with syntax error",
@@ -191,9 +192,22 @@ def demonstrate_sql_execution():
             print(f"   Query: {test_case['message'].query}")
             print(f"   SQL: {test_case['message'].final_sql}")
             
-            # Set up LLM mock response if provided
-            if "llm_response" in test_case:
-                mock_llm.generate_response.return_value = test_case["llm_response"]
+            # Set up LLM mock responses
+            if "llm_validation_response" in test_case and "llm_response" in test_case:
+                # Both validation and refinement responses
+                mock_llm.generate_response.side_effect = [
+                    test_case["llm_validation_response"],
+                    test_case["llm_response"]
+                ]
+            elif "llm_validation_response" in test_case:
+                # Only validation response
+                mock_llm.generate_response.return_value = test_case["llm_validation_response"]
+            elif "llm_response" in test_case:
+                # Only refinement response (validation will be called first)
+                mock_llm.generate_response.side_effect = [
+                    '{"is_valid": true}',  # Default validation response
+                    test_case["llm_response"]
+                ]
             
             # Process message
             response = refiner.talk(test_case["message"])
@@ -266,6 +280,7 @@ def demonstrate_agent_integration():
         
         mock_llm = Mock()
         mock_llm.generate_response = Mock()
+        mock_llm.generate_response.return_value = '{"is_valid": true}'
         refiner = RefinerAgent(
             data_path=temp_dir,
             dataset_name="integration_demo",
@@ -358,6 +373,7 @@ def demonstrate_mysql_integration():
     mock_mysql = MockMySQLAdapter()
     mock_llm = Mock()
     mock_llm.generate_response = Mock()
+    mock_llm.generate_response.return_value = '{"is_valid": true}'
     
     # Create Refiner with MySQL adapter
     refiner = RefinerAgent(
