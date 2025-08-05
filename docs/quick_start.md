@@ -172,7 +172,54 @@ print(f"复杂查询比例: {stats['complex_queries'] / stats['total_queries']:.
 print(f"RAG增强率: {stats['rag_enhancement_rate']:.2%}")
 ```
 
-### 6. 提示词管理系统使用
+### 6. Refiner智能体使用
+
+```python
+from agents.refiner_agent import RefinerAgent
+from utils.models import ChatMessage
+from services.llm_service import LLMService
+from storage.mysql_adapter import MySQLAdapter
+
+# 创建Refiner智能体
+llm_service = LLMService()
+mysql_adapter = MySQLAdapter()  # 可选，用于MySQL数据库
+
+refiner = RefinerAgent(
+    data_path="/path/to/databases",
+    dataset_name="production",
+    llm_service=llm_service,
+    mysql_adapter=mysql_adapter
+)
+
+# 创建包含SQL的消息
+message = ChatMessage(
+    db_id="ecommerce_db",
+    query="显示所有活跃用户及其订单数量",
+    final_sql="SELECT u.name, COUNT(o.id) as order_count FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.status = 'active' GROUP BY u.id",
+    desc_str="users(id, name, status), orders(id, user_id, amount)",
+    fk_str="users.id = orders.user_id"
+)
+
+# 处理SQL验证和执行
+response = refiner.talk(message)
+
+if response.success:
+    print(f"SQL执行成功")
+    print(f"执行时间: {response.message.execution_result['execution_time']:.3f}s")
+    print(f"结果行数: {len(response.message.execution_result['data'])}")
+    if response.message.fixed:
+        print(f"SQL已修正: {response.message.final_sql}")
+else:
+    print(f"执行失败: {response.error}")
+
+# 获取统计信息
+stats = refiner.get_stats()
+print(f"验证次数: {stats['validation_count']}")
+print(f"修正率: {stats['refinement_rate']:.2%}")
+print(f"安全违规率: {stats['security_violation_rate']:.2%}")
+```
+
+### 7. 提示词管理系统使用
 
 ```python
 from utils.prompts import (
@@ -228,8 +275,10 @@ class CustomAgent:
 import asyncio
 from agents.selector_agent import SelectorAgent
 from agents.decomposer_agent import DecomposerAgent
+from agents.refiner_agent import RefinerAgent
 from agents.base_agent import MessageRouter
 from utils.models import ChatMessage
+from services.llm_service import LLMService
 
 async def process_query():
     # 创建消息路由器
@@ -238,6 +287,11 @@ async def process_query():
     # 创建智能体
     selector = SelectorAgent("Selector", router=router)
     decomposer = DecomposerAgent("Decomposer", dataset_name="generic", router=router)
+    refiner = RefinerAgent(
+        data_path="/path/to/databases",
+        dataset_name="production",
+        llm_service=LLMService()
+    )
     
     # 创建查询消息
     message = ChatMessage(
@@ -261,7 +315,19 @@ async def process_query():
             print(f"生成的SQL: {decomposer_response.message.final_sql}")
             print(f"子问题数量: {decomposer_response.metadata.get('sub_questions_count', 0)}")
             print(f"RAG增强: {decomposer_response.metadata.get('rag_enhanced', False)}")
-            print(f"子问题列表: {decomposer_response.metadata.get('sub_questions', [])}")
+            
+            # 步骤3: Refiner处理
+            refiner_response = refiner.process_message(decomposer_response.message)
+            
+            if refiner_response.success:
+                print("✅ Refiner处理成功")
+                print(f"SQL执行成功: {refiner_response.message.execution_result['is_successful']}")
+                print(f"执行时间: {refiner_response.message.execution_result['execution_time']:.3f}s")
+                if refiner_response.message.fixed:
+                    print(f"SQL已修正: {refiner_response.message.final_sql}")
+                print(f"处理完成: {refiner_response.message.send_to}")
+            else:
+                print(f"❌ Refiner处理失败: {refiner_response.error}")
         else:
             print(f"❌ Decomposer处理失败: {decomposer_response.error}")
         

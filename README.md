@@ -46,9 +46,18 @@ This system uniquely integrates two proven approaches:
 - **通信协议**: 高级智能体间通信，支持优先级队列和会话管理
 - **代码质量**: 持续的代码格式优化和注释改进，确保代码可读性和维护性
 
+### ✅ 完整的MAC-SQL智能体协作系统
+
+- **BaseAgent基类**: 抽象基类和完整的消息传递机制
+- **Selector智能体**: MySQL数据库模式理解和智能裁剪，支持token限制优化
+- **Decomposer智能体**: 完整实现查询分解和SQL生成，支持CoT推理、多数据集适配和RAG增强
+- **Refiner智能体**: SQL执行验证、错误修正和安全检查，支持超时控制和智能修复
+- **LLM服务**: 统一的语言模型调用接口，支持查询分解和SQL生成
+- **提示词管理系统**: 集中化的提示词模板管理，支持参数化和动态格式化
+- **通信协议**: 高级智能体间通信，支持优先级队列和会话管理
+
 ### 🚧 开发中功能
 
-- **Refiner智能体**: SQL执行验证和错误修正（规划中）
 - **LangGraph工作流**: 智能体编排和状态管理（规划中）
 
 ## Architecture
@@ -170,6 +179,16 @@ python -m services.chat_manager
 - **性能监控**: 完整的统计系统，包括查询复杂度分析、RAG增强率和成功率跟踪
 - **动态配置**: 支持运行时配置更新、数据集切换和RAG检索器设置
 
+### Refiner智能体 (agents/refiner_agent.py)
+
+- **SQL执行验证**: 自动执行生成的SQL查询并验证结果正确性
+- **安全检查**: 内置SQL注入防护，检测和阻止危险的SQL操作
+- **错误修正**: 基于执行错误智能修正SQL语句，支持语法错误、表名错误、列名错误等
+- **超时控制**: 120秒执行超时保护，防止长时间运行的查询影响系统性能
+- **多数据库支持**: 支持MySQL和SQLite数据库，可配置数据库适配器
+- **LLM增强修复**: 利用LLM服务进行智能SQL修正，提供上下文感知的错误修复
+- **统计监控**: 详细的执行统计，包括验证次数、修正率、安全违规率等指标
+
 ### LLM服务 (services/llm_service.py)
 
 - **统一接口**: 标准化的LLM调用接口，支持多种模型
@@ -213,6 +232,7 @@ python -m services.chat_manager
 
 - [Selector智能体示例](examples/selector_agent_example.py) - 完整的使用演示
 - [Decomposer智能体示例](examples/decomposer_agent_example.py) - 查询分解和SQL生成演示
+- [Refiner智能体示例](examples/refiner_agent_example.py) - SQL验证和错误修正演示
 - [BaseAgent通信示例](examples/base_agent_communication_example.py) - 智能体间通信演示
 - [增强型RAG检索示例](examples/enhanced_rag_retriever_example.py) - RAG检索功能演示
 - [训练服务示例](examples/vanna_training_service_example.py) - 训练系统使用演示
