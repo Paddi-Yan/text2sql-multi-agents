@@ -1,7 +1,8 @@
 """
 LangGraph工作流系统使用示例
 
-演示如何使用Text2SQL工作流的状态定义、节点函数和条件路由逻辑。
+演示如何使用Text2SQL工作流的状态定义、节点函数和条件路由逻辑，
+以及新的OptimizedChatManager的使用方法。
 """
 
 import sys
@@ -15,7 +16,9 @@ from services.workflow import (
     refiner_node,
     should_continue,
     initialize_state,
-    finalize_state
+    finalize_state,
+    create_text2sql_workflow,
+    OptimizedChatManager
 )
 import logging
 
@@ -160,9 +163,124 @@ def demonstrate_routing_logic():
         logger.info(f"重试 {retry_count}/2 -> {route} (期望: {expected})")
 
 
+def demonstrate_workflow_creation():
+    """演示工作流创建"""
+    logger.info("=== 演示工作流创建 ===")
+    
+    try:
+        workflow = create_text2sql_workflow()
+        logger.info(f"工作流创建成功: {type(workflow)}")
+        logger.info("工作流节点和边已配置完成")
+        return workflow
+    except Exception as e:
+        logger.error(f"工作流创建失败: {e}")
+        return None
+
+
+def demonstrate_chat_manager():
+    """演示OptimizedChatManager的使用"""
+    logger.info("=== 演示OptimizedChatManager ===")
+    
+    try:
+        # 创建ChatManager实例
+        chat_manager = OptimizedChatManager(
+            data_path="data",
+            tables_json_path="data/tables.json",
+            dataset_name="bird",
+            max_rounds=3
+        )
+        
+        logger.info("ChatManager创建成功")
+        
+        # 健康检查
+        health = chat_manager.health_check()
+        logger.info(f"健康检查结果: {health['status']}")
+        
+        # 演示查询处理（注意：需要实际的智能体实现才能完整运行）
+        logger.info("演示查询处理接口（模拟）")
+        
+        sample_queries = [
+            {
+                "db_id": "california_schools",
+                "query": "List all schools in Los Angeles with SAT scores above 1400",
+                "evidence": "The database contains school information including location and test scores"
+            },
+            {
+                "db_id": "company_db",
+                "query": "Show me the top 5 employees by salary",
+                "evidence": "Employee table contains salary information"
+            }
+        ]
+        
+        for i, query_data in enumerate(sample_queries, 1):
+            logger.info(f"示例查询 {i}: {query_data['query'][:30]}...")
+            
+            # 注意：实际调用需要智能体实现
+            # result = chat_manager.process_query(**query_data)
+            # logger.info(f"处理结果: 成功={result['success']}")
+        
+        # 显示统计信息
+        stats = chat_manager.get_stats()
+        logger.info(f"当前统计: {stats}")
+        
+        return chat_manager
+        
+    except Exception as e:
+        logger.error(f"ChatManager演示失败: {e}")
+        return None
+
+
+def demonstrate_integration_workflow():
+    """演示完整的集成工作流"""
+    logger.info("=== 演示完整集成工作流 ===")
+    
+    try:
+        # 1. 创建工作流
+        workflow = create_text2sql_workflow()
+        if not workflow:
+            logger.error("工作流创建失败")
+            return
+        
+        # 2. 创建ChatManager
+        chat_manager = OptimizedChatManager()
+        if not chat_manager:
+            logger.error("ChatManager创建失败")
+            return
+        
+        # 3. 演示状态监控
+        logger.info("工作流状态监控演示:")
+        initial_state = initialize_state(
+            db_id="demo_db",
+            query="SELECT * FROM users WHERE age > 25",
+            evidence="User table contains age information"
+        )
+        
+        logger.info(f"初始状态: {initial_state['current_agent']}")
+        logger.info(f"最大重试次数: {initial_state['max_retries']}")
+        logger.info(f"处理阶段: {initial_state['processing_stage']}")
+        
+        # 4. 演示错误处理
+        logger.info("错误处理机制演示:")
+        error_state = initial_state.copy()
+        error_state.update({
+            'current_agent': 'Error',
+            'error_message': '模拟错误',
+            'finished': True,
+            'success': False
+        })
+        
+        route = should_continue(error_state)
+        logger.info(f"错误状态路由: {route}")
+        
+        logger.info("集成工作流演示完成")
+        
+    except Exception as e:
+        logger.error(f"集成工作流演示失败: {e}")
+
+
 def main():
     """主函数"""
-    logger.info("LangGraph工作流系统示例")
+    logger.info("LangGraph工作流系统完整示例")
     
     try:
         # 1. 演示状态结构
@@ -175,11 +293,23 @@ def main():
         
         print("\n" + "="*50 + "\n")
         
-        # 3. 模拟完整工作流（注意：需要实际的智能体实现）
-        logger.info("注意: 完整工作流模拟需要实际的智能体实现")
-        logger.info("当前仅演示工作流框架结构")
+        # 3. 演示工作流创建
+        demonstrate_workflow_creation()
         
-        # simulate_workflow_execution()  # 取消注释以运行完整模拟
+        print("\n" + "="*50 + "\n")
+        
+        # 4. 演示ChatManager
+        demonstrate_chat_manager()
+        
+        print("\n" + "="*50 + "\n")
+        
+        # 5. 演示完整集成
+        demonstrate_integration_workflow()
+        
+        print("\n" + "="*50 + "\n")
+        
+        logger.info("注意: 完整功能需要实际的智能体实现")
+        logger.info("当前演示了工作流框架和ChatManager的结构")
         
     except Exception as e:
         logger.error(f"示例执行失败: {e}")

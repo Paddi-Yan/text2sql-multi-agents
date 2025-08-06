@@ -22,9 +22,10 @@ Refiner智能体是Text2SQL多智能体系统的最后一个环节，负责SQL�
 ### 2. SQL执行验证
 
 #### 多数据库支持
-- **MySQL集成**: 通过MySQLAdapter支持真实MySQL数据库执行
-- **SQLite备选**: 开发和测试环境下的SQLite数据库支持
-- **统一接口**: 透明的数据库切换，统一的执行结果格式
+- **MySQL集成**: 通过MySQLAdapter支持真实MySQL数据库执行，适用于生产环境
+- **SQLite备选**: 开发和测试环境下的SQLite数据库支持，提供轻量级的本地测试能力
+- **自动切换**: 当MySQL适配器不可用时，自动降级到SQLite进行测试和开发
+- **统一接口**: 透明的数据库切换，统一的执行结果格式，确保代码兼容性
 
 #### 超时控制
 - **执行超时**: 120秒执行超时保护，防止长时间运行的查询
@@ -70,9 +71,37 @@ class RefinerAgent(BaseAgent):
                  llm_service: Optional[LLMService] = None,
                  mysql_adapter: Optional[MySQLAdapter] = None):
         # 初始化智能体
+        # data_path: SQLite数据库文件路径（用于测试/开发环境）
+        # mysql_adapter: MySQL适配器（用于生产环境）
         
     def talk(self, message: ChatMessage) -> AgentResponse:
         # 处理消息的主要接口
+```
+
+### 数据库执行策略
+
+```python
+def _execute_sql(self, sql: str, db_id: str) -> SQLExecutionResult:
+    """执行SQL查询，支持MySQL和SQLite双重策略"""
+    
+    if self.mysql_adapter:
+        # 优先使用MySQL适配器（生产环境）
+        try:
+            data = self.mysql_adapter.execute_query(sql)
+            return SQLExecutionResult(sql=sql, data=data, is_successful=True)
+        except Exception as e:
+            self.logger.warning(f"MySQL execution failed: {e}")
+            
+    else:
+        # 降级到SQLite（开发/测试环境）
+        import sqlite3
+        db_path = self._resolve_sqlite_path(db_id)
+        
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql)
+            data = cursor.fetchall()
+            return SQLExecutionResult(sql=sql, data=data, is_successful=True)
 ```
 
 ### 安全验证器
@@ -149,13 +178,15 @@ def talk(self, message: ChatMessage) -> AgentResponse:
 ## 使用示例
 
 ### 基本使用
+
+#### 生产环境配置（MySQL）
 ```python
 from agents.refiner_agent import RefinerAgent
 from utils.models import ChatMessage
 from services.llm_service import LLMService
 from storage.mysql_adapter import MySQLAdapter
 
-# 创建Refiner智能体
+# 创建Refiner智能体（生产环境）
 llm_service = LLMService()
 mysql_adapter = MySQLAdapter()
 
@@ -163,7 +194,24 @@ refiner = RefinerAgent(
     data_path="/path/to/databases",
     dataset_name="production",
     llm_service=llm_service,
-    mysql_adapter=mysql_adapter
+    mysql_adapter=mysql_adapter  # 使用MySQL适配器
+)
+```
+
+#### 开发/测试环境配置（SQLite）
+```python
+from agents.refiner_agent import RefinerAgent
+from utils.models import ChatMessage
+from services.llm_service import LLMService
+
+# 创建Refiner智能体（开发/测试环境）
+llm_service = LLMService()
+
+refiner = RefinerAgent(
+    data_path="/path/to/sqlite/databases",  # SQLite数据库文件路径
+    dataset_name="development",
+    llm_service=llm_service
+    # 不提供mysql_adapter，将自动使用SQLite
 )
 
 # 处理SQL验证请求

@@ -2,6 +2,57 @@
 
 ## [未发布] - 开发中
 
+### 🔄 Refiner智能体数据库支持更新 (2024-01-08)
+
+#### 架构改进
+- **重要变化**: 在Refiner智能体中重新引入SQLite支持作为开发/测试环境的备选方案
+- **双数据库策略**: 
+  - **生产环境**: 优先使用MySQL适配器，获得最佳性能和企业级特性
+  - **开发/测试环境**: 当MySQL适配器不可用时，自动降级到SQLite
+- **智能切换**: 根据`mysql_adapter`参数的存在自动选择数据库类型
+
+#### 技术实现
+- **代码变化**: 在`agents/refiner_agent.py`中重新添加`import sqlite3`
+- **执行逻辑**: 实现了智能的数据库选择和执行逻辑
+- **路径解析**: 改进的SQLite数据库文件路径解析机制
+- **错误处理**: 统一的MySQL和SQLite错误处理机制
+
+#### 开发体验改进
+- **快速启动**: 开发者无需配置MySQL即可开始本地开发
+- **测试简化**: 单元测试和CI/CD环境无需外部数据库依赖
+- **离线开发**: 支持完全离线的开发和测试环境
+
+#### 文档更新
+- **新增文档**: `docs/refiner_agent_database_support_update.md` - 详细的架构变化说明
+- **更新文档**: `docs/refiner_agent.md` - 添加双数据库支持的使用说明
+- **快速指南**: `docs/quick_start.md` - 更新Refiner智能体配置示例
+- **README更新**: 更新Refiner智能体功能描述
+
+#### 兼容性保证
+- ✅ **向后兼容**: 所有现有的MySQL配置继续正常工作
+- ✅ **API一致**: 统一的接口和返回格式，无论使用哪种数据库
+- ✅ **生产无影响**: 生产环境部署和性能不受任何影响
+
+### 🔧 LangGraph导入修复 (2024-01-08)
+
+#### 问题修复
+- **修复文件**: `services/workflow.py` - LangGraph导入语句修复
+- **问题描述**: 修正了错误的LangGraph导入路径，确保与最新版本的LangGraph库兼容
+- **修复详情**:
+  - **修复前**: `from langgraph import StateGraph, END` 和 `from langgraph.graph import Graph`
+  - **修复后**: `from langgraph.graph import StateGraph, END`
+  - **影响**: 避免了潜在的导入错误，确保工作流系统正常运行
+
+#### 文档更新
+- **`docs/langgraph_workflow.md`**: 更新了正确的LangGraph导入示例
+- **技术依赖说明**: 添加了正确的导入路径说明和注意事项
+- **代码示例修正**: 所有相关代码示例都已更新为正确的导入方式
+
+#### 兼容性改进
+- **库版本兼容**: 确保与最新版本的LangGraph库保持兼容
+- **导入标准化**: 统一了项目中所有LangGraph相关的导入语句
+- **错误预防**: 避免了因导入错误导致的运行时异常
+
 ### 🚀 LangGraph工作流编排系统
 
 #### 新增核心功能

@@ -190,7 +190,8 @@ python -m services.chat_manager
 - **安全检查**: 内置SQL注入防护，检测和阻止危险的SQL操作
 - **错误修正**: 基于执行错误智能修正SQL语句，支持语法错误、表名错误、列名错误等
 - **超时控制**: 120秒执行超时保护，防止长时间运行的查询影响系统性能
-- **多数据库支持**: 支持MySQL和SQLite数据库，可配置数据库适配器
+- **双数据库支持**: 生产环境使用MySQL，开发/测试环境自动降级到SQLite，提供灵活的部署选项
+- **智能切换**: 根据环境配置自动选择合适的数据库，确保最佳的开发体验和生产性能
 - **LLM增强修复**: 利用LLM服务进行智能SQL修正，提供上下文感知的错误修复
 - **统计监控**: 详细的执行统计，包括验证次数、修正率、安全违规率等指标
 
@@ -252,6 +253,8 @@ python -m services.chat_manager
 - [训练服务示例](examples/vanna_training_service_example.py) - 训练系统使用演示
 - [LLM集成测试示例](examples/test_llm_integration.py) - LLM服务集成测试
 - [LangGraph工作流示例](examples/workflow_example.py) - 工作流编排系统使用演示
+- [完整工作流测试](examples/complete_workflow_test.py) - 端到端工作流测试和验证
+- [简单工作流测试](examples/simple_workflow_test.py) - 基础工作流功能测试
 
 ### 技术文档
 

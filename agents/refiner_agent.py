@@ -10,7 +10,6 @@ This agent is responsible for:
 """
 import re
 import time
-import sqlite3
 import logging
 import threading
 from typing import Dict, List, Optional, Any, Tuple
@@ -19,7 +18,7 @@ from contextlib import contextmanager
 from agents.base_agent import BaseAgent
 from utils.models import ChatMessage, AgentResponse, SQLExecutionResult, SecurityValidationResult, RiskLevel
 from utils.prompts import get_refiner_validation_prompt, get_refiner_refinement_prompt
-from services.llm_service import LLMService
+from services.llm_service import llm_service
 from storage.mysql_adapter import MySQLAdapter
 
 
@@ -138,21 +137,18 @@ class RefinerAgent(BaseAgent):
     """Refiner agent for SQL execution validation and error correction."""
     
     def __init__(self, data_path: str, dataset_name: str = "generic", 
-                 llm_service: Optional[LLMService] = None,
                  mysql_adapter: Optional[MySQLAdapter] = None):
         """Initialize Refiner agent.
         
         Args:
             data_path: Path to database files
             dataset_name: Dataset name for context
-            llm_service: LLM service for refinement
             mysql_adapter: MySQL adapter for database operations
         """
         super().__init__("Refiner")
         
         self.data_path = data_path
         self.dataset_name = dataset_name
-        self.llm_service = llm_service or LLMService()
         self.mysql_adapter = mysql_adapter
         self.security_validator = SQLSecurityValidator()
         
@@ -282,6 +278,8 @@ class RefinerAgent(BaseAgent):
             is_successful=False
         )
         
+        self.logger.info(f"Executing SQL: {sql}")
+        
         try:
             if self.mysql_adapter:
                 # Use MySQL adapter for real database execution
@@ -289,14 +287,18 @@ class RefinerAgent(BaseAgent):
                     data = self.mysql_adapter.execute_query(sql)
                     result.data = [(tuple(row.values()) if isinstance(row, dict) else row) for row in data]
                     result.is_successful = True
+                    self.logger.info(f"SQL executed successfully, returned {len(result.data)} rows")
                     
                 except Exception as e:
                     result.sqlite_error = str(e)
                     result.exception_class = type(e).__name__
+                    self.logger.warning(f"MySQL error: {e}")
                     
             else:
                 # Fallback to SQLite for testing/development
                 import os
+                import sqlite3
+                
                 if os.path.exists(f"{self.data_path}/{db_id}.sqlite"):
                     db_path = f"{self.data_path}/{db_id}.sqlite"
                 elif os.path.exists(f"{self.data_path}/{db_id}/{db_id}.sqlite"):
@@ -311,15 +313,15 @@ class RefinerAgent(BaseAgent):
                     result.data = cursor.fetchall()
                     result.is_successful = True
                         
-        except sqlite3.Error as e:
-            result.sqlite_error = str(e)
-            result.exception_class = type(e).__name__
-            self.logger.warning(f"SQLite error: {e}")
-            
         except Exception as e:
+            # Handle both SQLite and MySQL errors
+            if 'sqlite3' in str(type(e)):
+                self.logger.warning(f"SQLite error: {e}")
+            else:
+                self.logger.warning(f"Database error: {e}")
+            
             result.sqlite_error = str(e)
             result.exception_class = type(e).__name__
-            self.logger.error(f"Unexpected error during SQL execution: {e}")
         
         finally:
             result.execution_time = time.time() - start_time
@@ -347,12 +349,14 @@ class RefinerAgent(BaseAgent):
             )
             
             # Call LLM for validation
-            response = self.llm_service.generate_response(
+            llm_response = llm_service.generate_completion(
+                prompt=user_prompt,
                 system_prompt=system_prompt,
-                user_prompt=user_prompt,
                 temperature=0.1,  # Low temperature for consistent validation
                 max_tokens=800
             )
+            
+            response = llm_response.content if llm_response.success else None
             
             if response and response.strip():
                 # Try to parse JSON response
@@ -475,12 +479,14 @@ class RefinerAgent(BaseAgent):
             )
             
             # Call LLM for refinement
-            response = self.llm_service.generate_response(
+            llm_response = llm_service.generate_completion(
+                prompt=user_prompt,
                 system_prompt=system_prompt,
-                user_prompt=user_prompt,
                 temperature=0.1,  # Low temperature for precise corrections
                 max_tokens=1000
             )
+            
+            response = llm_response.content if llm_response.success else None
             
             if response and response.strip():
                 # Extract SQL from response

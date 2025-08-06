@@ -174,21 +174,39 @@ print(f"RAG增强率: {stats['rag_enhancement_rate']:.2%}")
 
 ### 6. Refiner智能体使用
 
+#### 生产环境配置（推荐）
 ```python
 from agents.refiner_agent import RefinerAgent
 from utils.models import ChatMessage
 from services.llm_service import LLMService
 from storage.mysql_adapter import MySQLAdapter
 
-# 创建Refiner智能体
+# 创建Refiner智能体（生产环境）
 llm_service = LLMService()
-mysql_adapter = MySQLAdapter()  # 可选，用于MySQL数据库
+mysql_adapter = MySQLAdapter()  # 使用MySQL适配器
 
 refiner = RefinerAgent(
-    data_path="/path/to/databases",
+    data_path="/path/to/databases",  # MySQL模式下此路径不会被使用
     dataset_name="production",
     llm_service=llm_service,
-    mysql_adapter=mysql_adapter
+    mysql_adapter=mysql_adapter  # 提供MySQL适配器
+)
+```
+
+#### 开发/测试环境配置
+```python
+from agents.refiner_agent import RefinerAgent
+from utils.models import ChatMessage
+from services.llm_service import LLMService
+
+# 创建Refiner智能体（开发/测试环境）
+llm_service = LLMService()
+
+refiner = RefinerAgent(
+    data_path="/path/to/sqlite/databases",  # SQLite数据库文件路径
+    dataset_name="development",
+    llm_service=llm_service
+    # 不提供mysql_adapter，将自动使用SQLite作为备选
 )
 
 # 创建包含SQL的消息
@@ -269,7 +287,13 @@ class CustomAgent:
 
 ### 8. LangGraph工作流编排使用
 
+**重要提示**: 确保正确导入LangGraph组件：
+
 ```python
+# 正确的导入方式
+from langgraph.graph import StateGraph, END
+
+# 工作流相关导入
 from services.workflow import (
     initialize_state,
     selector_node,
@@ -606,6 +630,19 @@ python examples/vanna_training_service_example.py
 
 # 运行RAG检索示例
 python examples/enhanced_rag_retriever_example.py
+```
+
+### 3. 运行工作流测试
+
+```bash
+# 运行完整的端到端工作流测试
+python examples/complete_workflow_test.py
+
+# 运行简单工作流测试
+python examples/simple_workflow_test.py
+
+# 运行工作流示例
+python examples/workflow_example.py
 ```
 
 ## 常见问题

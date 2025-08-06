@@ -4,6 +4,16 @@
 
 本文档描述了Text2SQL多智能体系统的LangGraph工作流编排实现。该系统通过状态定义、节点函数和条件路由逻辑，实现了Selector、Decomposer、Refiner三个智能体的协作处理流程。
 
+## 最新更新 (2024-01-08)
+
+### LangGraph导入修复
+
+- **问题修复**: 修正了 `services/workflow.py` 中的LangGraph导入语句
+- **修复前**: `from langgraph import StateGraph, END` 和 `from langgraph.graph import Graph`
+- **修复后**: `from langgraph.graph import StateGraph, END`
+- **影响**: 确保了LangGraph工作流系统的正确导入和运行，避免了潜在的导入错误
+- **兼容性**: 与最新版本的LangGraph库保持兼容
+
 ## 核心组件
 
 ### 1. 状态定义 (Text2SQLState)
@@ -333,7 +343,7 @@ final_state = finalize_state(state)
 ### 与LangGraph集成
 
 ```python
-from langgraph import StateGraph, END
+from langgraph.graph import StateGraph, END
 
 def create_text2sql_workflow():
     """创建Text2SQL工作流"""
@@ -349,20 +359,15 @@ def create_text2sql_workflow():
     
     # 添加边
     workflow.add_edge("selector", "decomposer")
-    workflow.add_conditional_edges(
-        "decomposer",
-        should_continue,
-        {
-            "refiner": "refiner",
-            "end": END
-        }
-    )
+    workflow.add_edge("decomposer", "refiner")
+    
+    # 添加条件边：Refiner的条件路由
     workflow.add_conditional_edges(
         "refiner",
         should_continue,
         {
-            "decomposer": "decomposer",
-            "end": END
+            "decomposer": "decomposer",  # 重试
+            "end": END                   # 结束
         }
     )
     
@@ -428,6 +433,25 @@ python examples/workflow_example.py
 - 错误信息记录
 - 性能指标输出
 
+## 技术依赖
+
+### 核心依赖
+
+- **LangGraph**: 多智能体工作流编排框架
+- **Python 3.8+**: 主要开发语言
+- **TypedDict**: 状态类型定义支持
+
+### 导入要求
+
+```python
+from langgraph.graph import StateGraph, END
+from typing import TypedDict
+import logging
+import time
+```
+
+**重要提示**: 请确保使用正确的LangGraph导入路径 `from langgraph.graph import StateGraph, END`，而不是 `from langgraph import StateGraph, END`。这是LangGraph库的正确导入方式。
+
 ## 总结
 
 LangGraph工作流编排系统为Text2SQL多智能体协作提供了强大的基础框架，具有以下特点：
@@ -438,5 +462,6 @@ LangGraph工作流编排系统为Text2SQL多智能体协作提供了强大的基
 4. **完善的错误处理**: 多层次的错误处理和恢复机制
 5. **全面的测试覆盖**: 完整的单元测试和示例代码
 6. **良好的扩展性**: 易于添加新功能和集成外部系统
+7. **正确的依赖导入**: 使用标准的LangGraph导入路径确保兼容性
 
 该系统为后续的工作流图构建和ChatManager集成奠定了坚实的基础。

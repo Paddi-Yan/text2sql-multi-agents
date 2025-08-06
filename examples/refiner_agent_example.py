@@ -121,8 +121,7 @@ def demonstrate_sql_execution():
         # Create Refiner agent
         refiner = RefinerAgent(
             data_path=temp_dir,
-            dataset_name="demo",
-            llm_service=mock_llm
+            dataset_name="demo"
         )
         
         print(f"Created Refiner agent: {refiner.agent_name}")
@@ -278,13 +277,9 @@ def demonstrate_agent_integration():
         selector = MockSelectorAgent()
         decomposer = MockDecomposerAgent()
         
-        mock_llm = Mock()
-        mock_llm.generate_response = Mock()
-        mock_llm.generate_response.return_value = '{"is_valid": true}'
         refiner = RefinerAgent(
             data_path=temp_dir,
-            dataset_name="integration_demo",
-            llm_service=mock_llm
+            dataset_name="integration_demo"
         )
         
         print("Created agent pipeline: Selector -> Decomposer -> Refiner")
@@ -379,7 +374,6 @@ def demonstrate_mysql_integration():
     refiner = RefinerAgent(
         data_path="/tmp",  # Not used with MySQL
         dataset_name="mysql_demo",
-        llm_service=mock_llm,
         mysql_adapter=mock_mysql
     )
     
