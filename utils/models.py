@@ -1,173 +1,24 @@
 """
-Core data models and interfaces for Text2SQL system.
+Data models for the Text2SQL system.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
-
-
-@dataclass
-class ChatMessage:
-    """Standard message format for inter-agent communication."""
-    db_id: str
-    query: str
-    evidence: str = ""
-    extracted_schema: Optional[Dict] = None
-    desc_str: str = ""
-    fk_str: str = ""
-    final_sql: str = ""
-    qa_pairs: str = ""
-    send_to: str = "System"
-    pruned: bool = False
-    fixed: bool = False
-    execution_result: Optional[Dict] = None
-    chosen_db_schema_dict: Optional[Dict] = None
-    
-    # Enhanced fields for better message tracking and routing
-    message_id: str = field(default_factory=lambda: str(id(object())))
-    timestamp: datetime = field(default_factory=datetime.now)
-    sender: str = "System"
-    priority: int = 1  # 1=low, 2=normal, 3=high, 4=urgent
-    retry_count: int = 0
-    max_retries: int = 3
-    context: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    def copy(self) -> 'ChatMessage':
-        """Create a copy of the message."""
-        import copy
-        return copy.deepcopy(self)
-    
-    def route_to(self, agent_name: str) -> 'ChatMessage':
-        """Create a copy of message routed to specific agent.
-        
-        Args:
-            agent_name: Target agent name
-            
-        Returns:
-            New message instance with updated routing
-        """
-        new_message = self.copy()
-        new_message.send_to = agent_name
-        new_message.sender = self.send_to if self.send_to != "System" else "System"
-        return new_message
-    
-    def add_context(self, key: str, value: Any) -> 'ChatMessage':
-        """Add context information to message.
-        
-        Args:
-            key: Context key
-            value: Context value
-            
-        Returns:
-            Self for method chaining
-        """
-        self.context[key] = value
-        return self
-    
-    def get_context(self, key: str, default: Any = None) -> Any:
-        """Get context value.
-        
-        Args:
-            key: Context key
-            default: Default value
-            
-        Returns:
-            Context value or default
-        """
-        return self.context.get(key, default)
-    
-    def increment_retry(self) -> bool:
-        """Increment retry count.
-        
-        Returns:
-            True if retry is allowed, False if max retries exceeded
-        """
-        self.retry_count += 1
-        return self.retry_count <= self.max_retries
-    
-    def is_high_priority(self) -> bool:
-        """Check if message has high priority.
-        
-        Returns:
-            True if priority is high or urgent
-        """
-        return self.priority >= 3
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert message to dictionary.
-        
-        Returns:
-            Dictionary representation of message
-        """
-        return {
-            "message_id": self.message_id,
-            "timestamp": self.timestamp.isoformat(),
-            "db_id": self.db_id,
-            "query": self.query,
-            "evidence": self.evidence,
-            "send_to": self.send_to,
-            "sender": self.sender,
-            "priority": self.priority,
-            "retry_count": self.retry_count,
-            "final_sql": self.final_sql,
-            "pruned": self.pruned,
-            "fixed": self.fixed,
-            "context": self.context,
-            "metadata": self.metadata
-        }
-
-
-@dataclass
-class DatabaseInfo:
-    """Database metadata information."""
-    desc_dict: Dict[str, List[Tuple[str, str, str]]]  # table -> column descriptions
-    value_dict: Dict[str, List[Tuple[str, str]]]      # table -> column value examples
-    pk_dict: Dict[str, List[str]]                     # table -> primary key columns
-    fk_dict: Dict[str, List[Tuple[str, str, str]]]    # table -> foreign key relations
-
-
-@dataclass
-class DatabaseStats:
-    """Database statistics information."""
-    table_count: int
-    max_column_count: int
-    total_column_count: int
-    avg_column_count: int
-
-
-@dataclass
-class SQLExecutionResult:
-    """SQL execution result container."""
-    sql: str
-    data: Optional[List[Tuple]] = None
-    sqlite_error: str = ""
-    exception_class: str = ""
-    execution_time: float = 0.0
-    is_successful: bool = False
-
-
-class MemoryType(Enum):
-    """Types of memory records."""
-    POSITIVE_EXAMPLE = "positive"
-    NEGATIVE_EXAMPLE = "negative"
-    PATTERN_TEMPLATE = "template"
-    DOMAIN_KNOWLEDGE = "domain"
+from typing import List, Dict, Any, Optional, Tuple
 
 
 class TrainingDataType(Enum):
-    """Training data types for Vanna.ai-style RAG system."""
-    DDL_STATEMENT = "ddl"           # Data Definition Language statements
-    DOCUMENTATION = "doc"           # Business documentation
-    SQL_QUERY = "sql"              # SQL query examples
-    QUESTION_SQL_PAIR = "qa_pair"   # Question-SQL pairs
-    DOMAIN_KNOWLEDGE = "domain"     # Domain-specific knowledge
+    """训练数据类型"""
+    DDL_STATEMENT = "ddl"           # 数据定义语言语句
+    DOCUMENTATION = "doc"           # 业务文档和说明
+    SQL_QUERY = "sql"              # SQL查询示例
+    QUESTION_SQL_PAIR = "qa_pair"   # 问题-SQL对
+    DOMAIN_KNOWLEDGE = "domain"     # 领域知识
 
 
 @dataclass
 class TrainingData:
-    """Training data record for Vanna.ai-style RAG system."""
+    """训练数据记录"""
     id: str
     data_type: TrainingDataType
     content: str
@@ -176,16 +27,63 @@ class TrainingData:
     embedding: Optional[List[float]] = None
     created_at: datetime = field(default_factory=datetime.now)
     
-    # Type-specific fields
-    question: Optional[str] = None      # For QA pairs
-    sql: Optional[str] = None          # For QA pairs and SQL examples
-    table_names: List[str] = field(default_factory=list)  # Related table names
-    tags: List[str] = field(default_factory=list)         # Tags for categorization
+    # 特定类型的字段
+    question: Optional[str] = None      # 用于QA对
+    sql: Optional[str] = None          # 用于QA对和SQL示例
+    table_names: List[str] = field(default_factory=list)  # 相关表名
+    tags: List[str] = field(default_factory=list)         # 标签
+
+
+@dataclass
+class ChatMessage:
+    """智能体间消息传递的标准格式"""
+    db_id: str
+    query: str
+    evidence: str = ""
+    extracted_schema: dict = None
+    desc_str: str = ""
+    fk_str: str = ""
+    final_sql: str = ""
+    qa_pairs: str = ""
+    send_to: str = "System"
+    pruned: bool = False
+    fixed: bool = False
+    execution_result: dict = None
+    chosen_db_schema_dict: dict = None
+
+
+@dataclass
+class DatabaseInfo:
+    """数据库元数据信息"""
+    desc_dict: Dict[str, List[Tuple[str, str, str]]]  # 表->列描述
+    value_dict: Dict[str, List[Tuple[str, str]]]      # 表->列值示例
+    pk_dict: Dict[str, List[str]]                     # 表->主键列
+    fk_dict: Dict[str, List[Tuple[str, str, str]]]    # 表->外键关系
+
+
+@dataclass
+class DatabaseStats:
+    """数据库统计信息"""
+    table_count: int
+    max_column_count: int
+    total_column_count: int
+    avg_column_count: int
+
+
+@dataclass
+class SQLExecutionResult:
+    """SQL执行结果"""
+    sql: str
+    data: List[Tuple] = None
+    sqlite_error: str = ""
+    exception_class: str = ""
+    execution_time: float = 0.0
+    is_successful: bool = False
 
 
 @dataclass
 class MemoryRecord:
-    """Memory storage record for learning system."""
+    """记忆存储记录"""
     id: str
     natural_query: str
     sql_query: str
@@ -202,96 +100,82 @@ class MemoryRecord:
 
 @dataclass
 class LearningMetrics:
-    """Learning effectiveness evaluation metrics."""
+    """学习效果评估指标"""
     accuracy_trend: List[float]
     pattern_coverage: Dict[str, int]
     error_reduction_rate: float
     improvement_rate: float
 
 
+class MemoryType(Enum):
+    """记忆类型枚举"""
+    POSITIVE_EXAMPLE = "positive"  # 正确的查询示例
+    NEGATIVE_EXAMPLE = "negative"  # 错误的查询示例
+    PATTERN_TEMPLATE = "template"  # 查询模式模板
+    DOMAIN_KNOWLEDGE = "domain"    # 领域知识
+
+
 class RiskLevel(Enum):
-    """Security risk levels."""
+    """风险等级枚举"""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
-    CRITICAL = "critical"
 
 
 @dataclass
 class SecurityValidationResult:
-    """SQL security validation result."""
+    """安全验证结果"""
     is_safe: bool
     risk_level: RiskLevel
     detected_pattern: Optional[str] = None
     error: Optional[str] = None
-    recommendations: List[str] = field(default_factory=list)
-
-
-class CircuitBreakerState(Enum):
-    """Circuit breaker states."""
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
+    message: str = ""
 
 
 @dataclass
-class RetryPolicy:
-    """Retry policy configuration."""
-    max_attempts: int = 3
-    base_delay: float = 1.0
-    max_delay: float = 60.0
-    exponential_base: float = 2.0
-    jitter: bool = True
+class VectorSearchFilter:
+    """向量搜索过滤器"""
+    data_type: Optional[str] = None
+    db_id: Optional[str] = None
+    table_names: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    created_after: Optional[datetime] = None
+    created_before: Optional[datetime] = None
     
-    def calculate_delay(self, attempt: int) -> float:
-        """Calculate delay for given attempt number."""
-        delay = min(self.base_delay * (self.exponential_base ** attempt), self.max_delay)
-        if self.jitter:
-            import random
-            delay *= (0.5 + random.random() * 0.5)
-        return delay
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式用于向量数据库查询"""
+        filter_dict = {}
+        
+        if self.data_type:
+            filter_dict["data_type"] = self.data_type
+        if self.db_id:
+            filter_dict["db_id"] = self.db_id
+            
+        return filter_dict
 
 
 @dataclass
-class SystemMetrics:
-    """System performance metrics."""
-    query_count: int = 0
-    successful_queries: int = 0
-    failed_queries: int = 0
-    average_response_time: float = 0.0
-    cache_hit_rate: float = 0.0
-    accuracy_rate: float = 0.0
-    
-    @property
-    def success_rate(self) -> float:
-        """Calculate success rate."""
-        if self.query_count == 0:
-            return 0.0
-        return self.successful_queries / self.query_count
-    
-    @property
-    def error_rate(self) -> float:
-        """Calculate error rate."""
-        if self.query_count == 0:
-            return 0.0
-        return self.failed_queries / self.query_count
-
-
-@dataclass
-class QueryContext:
-    """Context information for query processing."""
-    user_id: str
-    session_id: str
-    timestamp: datetime
-    db_id: str
-    query: str
-    evidence: str = ""
+class EmbeddingRequest:
+    """嵌入生成请求"""
+    text: str
+    model: str = "text-embedding-ada-002"
+    user_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
+class EmbeddingResponse:
+    """嵌入生成响应"""
+    embedding: List[float]
+    model: str
+    usage: Dict[str, int]
+    request_id: str
+    processing_time: float = 0.0
+
+
+@dataclass
 class AgentResponse:
-    """Standard response format from agents."""
+    """智能体响应标准格式"""
     success: bool
     message: ChatMessage
     error: Optional[str] = None

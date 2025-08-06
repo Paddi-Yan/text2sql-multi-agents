@@ -8,21 +8,18 @@ from datetime import datetime
 
 from utils.models import TrainingData, TrainingDataType
 from config.settings import config
+from storage.vector_store import vector_store
+from services.embedding_service import embedding_service
 
 
 class VannaTrainingService:
     """Vanna.ai式训练服务，支持多种类型的训练数据"""
     
-    def __init__(self, vector_store, embedding_service):
-        """Initialize training service.
-        
-        Args:
-            vector_store: Vector database for storing embeddings
-            embedding_service: Service for generating embeddings
-        """
+    def __init__(self):
+        """Initialize training service."""
         self.vector_store = vector_store
         self.embedding_service = embedding_service
-        self.training_config = config.training_config
+        self.training_config = getattr(config, 'training_config', {})
         self.training_data_store = {}
     
     def train_ddl(self, ddl_statements: List[str], db_id: str) -> bool:
@@ -411,3 +408,5 @@ class EnhancedRAGRetriever:
         ])
         
         return "\n".join(prompt_parts)
+# Global training service instance
+training_service = VannaTrainingService()

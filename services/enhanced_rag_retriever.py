@@ -8,6 +8,8 @@ from enum import Enum
 
 from utils.models import TrainingDataType
 from config.settings import config
+from storage.vector_store import vector_store
+from services.embedding_service import embedding_service
 
 
 class RetrievalStrategy(Enum):
@@ -393,12 +395,10 @@ class PromptBuilder:
 class EnhancedRAGRetriever:
     """增强型RAG检索器，结合Vanna.ai的检索策略和高级功能"""
     
-    def __init__(self, vector_store, embedding_service, config: Optional[RetrievalConfig] = None):
+    def __init__(self, config: Optional[RetrievalConfig] = None):
         """Initialize enhanced retriever.
         
         Args:
-            vector_store: Vector database for searching
-            embedding_service: Service for generating embeddings
             config: Retrieval configuration
         """
         self.vector_store = vector_store
@@ -541,3 +541,6 @@ class EnhancedRAGRetriever:
         # 重新初始化依赖配置的组件
         self.context_builder = ContextBuilder(self.config)
         self.prompt_builder = PromptBuilder(self.config)
+
+# Global enhanced RAG retriever instance
+enhanced_rag_retriever = EnhancedRAGRetriever()

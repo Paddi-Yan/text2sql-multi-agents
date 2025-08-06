@@ -1,144 +1,95 @@
 """
-Application settings and configuration management.
+Application settings and configuration.
 """
 import os
-from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Any
+from dotenv import load_dotenv
 
-# Load environment variables from .env file
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    # dotenv not installed, skip loading .env file
-    pass
+load_dotenv()
 
-
-@dataclass
-class LLMConfig:
-    """LLM configuration settings."""
-    model_name: str = "gpt-4"
-    api_key: Optional[str] = None
-    max_tokens: int = 2000
-    temperature: float = 0.1
-    timeout: int = 30
-    
-    def __post_init__(self):
-        if self.api_key is None:
-            self.api_key = os.getenv("OPENAI_API_KEY")
-
-
-@dataclass
-class DatabaseConfig:
-    """Database connection configuration."""
-    host: str = "127.0.0.1"
-    port: int = 3306
-    username: Optional[str] = "root"
-    password: Optional[str] = "123456"
-    database: Optional[str] = "text2sql_db"
-    driver: str = "mysql+pymysql"
-    charset: str = "utf8mb4"
-    
-    def __post_init__(self):
-        self.host = os.getenv("DB_HOST", self.host)
-        self.port = int(os.getenv("DB_PORT", str(self.port)))
-        self.username = os.getenv("DB_USER", self.username)
-        self.password = os.getenv("DB_PASSWORD", self.password)
-        self.database = os.getenv("DB_NAME", self.database)
-    
-    @property
-    def connection_string(self) -> str:
-        """Get database connection string."""
-        return f"{self.driver}://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}?charset={self.charset}"
-
-
-@dataclass
-class CacheConfig:
-    """Redis cache configuration."""
-    host: str = "localhost"
-    port: int = 6379
-    password: Optional[str] = None
-    db: int = 0
-    ttl: int = 86400  # 24 hours
-    max_connections: int = 10
-    
-    def __post_init__(self):
-        self.host = os.getenv("REDIS_HOST", self.host)
-        self.port = int(os.getenv("REDIS_PORT", str(self.port)))
-        self.password = os.getenv("REDIS_PASSWORD", self.password)
-
-
-@dataclass
-class VectorStoreConfig:
-    """Milvus vector store configuration."""
-    host: str = "localhost"
-    port: int = 19530
-    collection_name: str = "text2sql_memory"
-    dimension: int = 1536  # OpenAI embedding dimension
-    
-    def __post_init__(self):
-        self.host = os.getenv("MILVUS_HOST", self.host)
-        self.port = int(os.getenv("MILVUS_PORT", str(self.port)))
-
-
-@dataclass
-class SecurityConfig:
-    """Security configuration settings."""
-    enable_sql_injection_check: bool = True
-    max_query_length: int = 10000
-    allowed_operations: list = None
-    
-    def __post_init__(self):
-        if self.allowed_operations is None:
-            self.allowed_operations = ["SELECT", "WITH"]
-
-
-@dataclass
-class MonitoringConfig:
-    """Monitoring and logging configuration."""
-    log_level: str = "INFO"
-    enable_tracing: bool = True
-    metrics_port: int = 8080
-    
-    def __post_init__(self):
-        self.log_level = os.getenv("LOG_LEVEL", self.log_level)
-
-
-@dataclass
-class TrainingConfig:
-    """Vanna.ai-style training configuration."""
-    embedding_model: str = "text-embedding-ada-002"
-    auto_train_ddl: bool = True
-    auto_train_successful_queries: bool = True
-    training_batch_size: int = 100
-    similarity_threshold: float = 0.8
-    max_training_examples: int = 10000
-    enable_incremental_learning: bool = True
-    
-    def __post_init__(self):
-        self.embedding_model = os.getenv("EMBEDDING_MODEL", self.embedding_model)
-
-
-@dataclass
-class SystemConfig:
-    """Main system configuration."""
-    llm_config: LLMConfig
-    database_config: DatabaseConfig
-    cache_config: CacheConfig
-    vector_store_config: VectorStoreConfig
-    training_config: TrainingConfig
-    security_config: SecurityConfig
-    monitoring_config: MonitoringConfig
+class Config:
+    """Application configuration class."""
     
     def __init__(self):
-        self.llm_config = LLMConfig()
+        self.training_config = TrainingConfig()
+        self.vector_store_config = VectorStoreConfig()
+        self.embedding_config = EmbeddingConfig()
         self.database_config = DatabaseConfig()
         self.cache_config = CacheConfig()
-        self.vector_store_config = VectorStoreConfig()
-        self.training_config = TrainingConfig()
-        self.security_config = SecurityConfig()
-        self.monitoring_config = MonitoringConfig()
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development mode."""
+        return os.getenv("ENVIRONMENT", "development").lower() == "development"
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production mode."""
+        return os.getenv("ENVIRONMENT", "development").lower() == "production"
+
+
+class TrainingConfig:
+    """Training service configuration."""
+    
+    def __init__(self):
+        self.auto_train_successful_queries = os.getenv("AUTO_TRAIN_SUCCESSFUL", "true").lower() == "true"
+        self.max_training_examples_per_type = int(os.getenv("MAX_TRAINING_EXAMPLES", "1000"))
+        self.embedding_batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "100"))
+        self.training_data_retention_days = int(os.getenv("TRAINING_RETENTION_DAYS", "365"))
+
+
+class VectorStoreConfig:
+    """Vector store configuration."""
+    
+    def __init__(self):
+        self.host = os.getenv("MILVUS_HOST", "localhost")
+        self.port = os.getenv("MILVUS_PORT", "19530")
+        self.collection_name = os.getenv("MILVUS_COLLECTION", "text2sql_vectors")
+        self.dimension = int(os.getenv("MILVUS_DIMENSION", "1024"))
+        self.use_mock = os.getenv("USE_MOCK_VECTOR_STORE", "false").lower() == "true"
+        
+        # Index configuration
+        self.index_type = os.getenv("MILVUS_INDEX_TYPE", "IVF_FLAT")
+        self.metric_type = os.getenv("MILVUS_METRIC_TYPE", "COSINE")
+        self.nlist = int(os.getenv("MILVUS_NLIST", "1024"))
+
+
+class EmbeddingConfig:
+    """Embedding model configuration."""
+    
+    def __init__(self):
+        self.model = os.getenv("EMBEDDING_MODEL")
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.base_url = os.getenv("OPENAI_BASE_URL")
+        self.dimension = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
+        self.batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
+        self.max_retries = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))
+
+
+class DatabaseConfig:
+    """Database configuration."""
+    
+    def __init__(self):
+        self.default_db_type = os.getenv("DEFAULT_DB_TYPE", "sqlite")
+        self.connection_timeout = int(os.getenv("DB_CONNECTION_TIMEOUT", "30"))
+        self.max_connections = int(os.getenv("DB_MAX_CONNECTIONS", "10"))
+        self.connection_retry_attempts = int(os.getenv("DB_RETRY_ATTEMPTS", "3"))
+
+
+class CacheConfig:
+    """Cache configuration."""
+    
+    def __init__(self):
+        self.redis_host = os.getenv("REDIS_HOST", "localhost")
+        self.redis_port = int(os.getenv("REDIS_PORT", "6379"))
+        self.redis_db = int(os.getenv("REDIS_DB", "0"))
+        self.redis_password = os.getenv("REDIS_PASSWORD")
+        
+        # Cache settings
+        self.l1_cache_size = int(os.getenv("L1_CACHE_SIZE", "1000"))
+        self.l2_cache_ttl = int(os.getenv("L2_CACHE_TTL", "86400"))  # 24 hours
+        self.use_mock_cache = os.getenv("USE_MOCK_CACHE", "false").lower() == "true"
 
 
 # Global configuration instance
-config = SystemConfig()
+config = Config()

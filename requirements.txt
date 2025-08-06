@@ -1,7 +1,7 @@
 # Core dependencies
 openai>=1.0.0
 langchain>=0.1.0
-langgraph>=0.1.0
+langgraph>=0.6.0
 
 # Vector database
 pymilvus>=2.3.0

@@ -15,6 +15,7 @@ from langgraph.graph import StateGraph, END
 from agents.selector_agent import SelectorAgent
 from agents.decomposer_agent import DecomposerAgent  
 from agents.refiner_agent import RefinerAgent
+from services.enhanced_rag_retriever import enhanced_rag_retriever
 from utils.models import ChatMessage
 
 logger = logging.getLogger(__name__)
@@ -163,7 +164,8 @@ def decomposer_node(state: Text2SQLState) -> Text2SQLState:
         # 创建Decomposer智能体实例
         decomposer = DecomposerAgent(
             agent_name="Decomposer",
-            dataset_name="bird"  # 从配置中获取
+            dataset_name="bird",  # 从配置中获取
+            rag_retriever=enhanced_rag_retriever
         )
         
         # 构建消息
