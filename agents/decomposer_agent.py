@@ -285,44 +285,88 @@ class DecomposerAgent(BaseAgent):
                     message, success=False, error="Missing database schema description"
                 )
             
-            # 步骤1: 查询分解
-            sub_questions = self._decompose_query(message.query, message.desc_str, message.evidence)
+            # 检查是否有错误历史需要处理
+            if message.error_context_available and message.error_history:
+                self.logger.info(f"Processing retry with {len(message.error_history)} error records")
+                return self._handle_retry_with_error_context(message)
             
-            # 步骤2: RAG增强（如果可用）
-            context = {}
-            if self.config.enable_rag_enhancement and self.rag_retriever:
-                context = self._retrieve_rag_context(message.query, message.db_id)
-                self.decomposition_stats["rag_enhanced_queries"] += 1
-            
-            # 步骤3: SQL生成
-            final_sql = self._generate_sql_steps(sub_questions, message.desc_str, message.fk_str, context)
-            
-            # 步骤4: 构建QA对字符串
-            qa_pairs = self._build_qa_pairs_string(sub_questions, final_sql, context)
-            
-            # 更新消息
-            message.final_sql = final_sql
-            message.qa_pairs = qa_pairs
-            message.send_to = "Refiner"  # 发送给Refiner进行验证
-            
-            # 更新统计信息
-            self._update_decomposition_stats(sub_questions, context)
-            
-            self.logger.info(f"Query decomposed into {len(sub_questions)} sub-questions")
-            self.logger.info(f"Generated SQL: {final_sql[:100]}...")
-            
-            return self._prepare_response(
-                message,
-                success=True,
-                sub_questions_count=len(sub_questions),
-                sub_questions=sub_questions,
-                rag_enhanced=bool(context),
-                sql_generated=True
-            )
+            # 正常处理流程
+            return self._handle_normal_processing(message)
             
         except Exception as e:
             self.logger.error(f"Error in query decomposition: {e}")
             return self._prepare_response(message, success=False, error=str(e))
+    
+    def _handle_normal_processing(self, message: ChatMessage) -> AgentResponse:
+        """处理正常的查询分解和SQL生成"""
+        # 步骤1: 查询分解
+        sub_questions = self._decompose_query(message.query, message.desc_str, message.evidence)
+        
+        # 步骤2: RAG增强（如果可用）
+        context = {}
+        if self.config.enable_rag_enhancement and self.rag_retriever:
+            context = self._retrieve_rag_context(message.query, message.db_id)
+            self.decomposition_stats["rag_enhanced_queries"] += 1
+        
+        # 步骤3: SQL生成
+        final_sql = self._generate_sql_steps(sub_questions, message.desc_str, message.fk_str, context)
+        
+        # 步骤4: 构建QA对字符串
+        qa_pairs = self._build_qa_pairs_string(sub_questions, final_sql, context)
+        
+        # 更新消息
+        message.final_sql = final_sql
+        message.qa_pairs = qa_pairs
+        message.send_to = "Refiner"  # 发送给Refiner进行验证
+        
+        # 更新统计信息
+        self._update_decomposition_stats(sub_questions, context)
+        
+        self.logger.info(f"Query decomposed into {len(sub_questions)} sub-questions")
+        self.logger.info(f"Generated SQL: {final_sql[:100]}...")
+        
+        return self._prepare_response(
+            message,
+            success=True,
+            sub_questions_count=len(sub_questions),
+            sub_questions=sub_questions,
+            rag_enhanced=bool(context),
+            sql_generated=True
+        )
+    
+    def _handle_retry_with_error_context(self, message: ChatMessage) -> AgentResponse:
+        """处理带错误上下文的重试"""
+        # 步骤1: 分析错误历史
+        error_patterns = self._analyze_error_patterns(message.error_history)
+        
+        # 步骤2: 构建错误感知的提示词（保持向后兼容）
+        enhanced_prompt = self._build_multi_error_aware_prompt(message)
+        
+        # 步骤3: 使用增强提示词生成SQL
+        final_sql = self._generate_sql_with_error_context(message, enhanced_prompt)
+        
+        # 步骤4: 构建包含错误分析的QA对字符串
+        qa_pairs = self._build_error_aware_qa_pairs(message, error_patterns)
+        
+        # 更新消息
+        message.final_sql = final_sql
+        message.qa_pairs = qa_pairs
+        message.send_to = "Refiner"
+        
+        self.logger.info(f"Generated retry SQL with error context: {final_sql[:100]}...")
+        self.logger.info(f"Error patterns identified: {error_patterns}")
+        
+        return self._prepare_response(
+            message,
+            success=True,
+            retry_with_error_context=True,
+            error_patterns=error_patterns,
+            sql_generated=True
+        )
+    
+
+    
+
     
     def _decompose_query(self, query: str, schema_info: str, evidence: str = "") -> List[str]:
         """分解查询为子问题"""
@@ -452,3 +496,174 @@ class DecomposerAgent(BaseAgent):
         self.sql_generator = SQLGenerator(self.config)
         
         self.logger.info(f"Switched to dataset: {dataset_name}")
+    
+    def _analyze_error_patterns(self, error_history: List[Dict[str, Any]]) -> List[str]:
+        """分析错误历史中的常见模式"""
+        patterns = []
+        
+        if not error_history:
+            return patterns
+        
+        # 统计错误类型（安全地获取）
+        error_types = [record.get('error_type', 'unknown') for record in error_history]
+        type_counts = {}
+        for error_type in error_types:
+            type_counts[error_type] = type_counts.get(error_type, 0) + 1
+        
+        # 识别重复的错误类型
+        for error_type, count in type_counts.items():
+            if count > 1:
+                patterns.append(f"Repeated {error_type} errors ({count} times)")
+        
+        # 检查是否有相同的错误消息（安全地获取）
+        error_messages = [record.get('error_message', '') for record in error_history]
+        error_messages = [msg for msg in error_messages if msg]  # 过滤空消息
+        if len(error_messages) > 1:
+            unique_messages = set(error_messages)
+            if len(unique_messages) < len(error_messages):
+                patterns.append("Some identical error messages repeated")
+        
+        # 检查SQL语句的相似性（简单检查）
+        failed_sqls = [record.get('failed_sql', '') for record in error_history]
+        failed_sqls = [sql for sql in failed_sqls if sql]  # 过滤空SQL
+        if len(failed_sqls) > 1:
+            # 简单检查是否有相同的SQL开头
+            sql_starts = [sql.strip()[:50].lower() for sql in failed_sqls]
+            if len(set(sql_starts)) < len(sql_starts):
+                patterns.append("Similar SQL query structures attempted multiple times")
+        
+        # 检查常见的错误关键词
+        common_errors = {}
+        for record in error_history:
+            error_msg = record.get('error_message', '').lower()
+            if 'no such table' in error_msg:
+                common_errors['table_not_found'] = common_errors.get('table_not_found', 0) + 1
+            elif 'no such column' in error_msg:
+                common_errors['column_not_found'] = common_errors.get('column_not_found', 0) + 1
+            elif 'syntax error' in error_msg:
+                common_errors['syntax_error'] = common_errors.get('syntax_error', 0) + 1
+        
+        for error_key, count in common_errors.items():
+            if count > 1:
+                patterns.append(f"Repeated {error_key} issues ({count} times)")
+        
+        return patterns
+    
+    def _build_multi_error_aware_prompt(self, message: ChatMessage) -> str:
+        """构建包含多轮错误上下文的提示词"""
+        # 获取基础提示词
+        base_prompt = self._get_base_prompt(message)
+        
+        if not message.error_history:
+            return base_prompt
+        
+        error_section = "\n# Previous Attempts Analysis\n\n"
+        error_section += "The following SQL generation attempts have failed. Please learn from these mistakes:\n\n"
+        
+        for i, error_record in enumerate(message.error_history, 1):
+            error_section += f"## Attempt {error_record['attempt_number']}\n\n"
+            error_section += f"**Failed SQL Query:**\n```sql\n{error_record['failed_sql']}\n```\n\n"
+            error_section += f"**Error Message:** {error_record['error_message']}\n\n"
+            error_section += f"**Error Type:** {error_record['error_type']}\n\n"
+        
+        # 分析错误模式
+        error_patterns = self._analyze_error_patterns(message.error_history)
+        if error_patterns:
+            error_section += "## Common Error Patterns Identified\n\n"
+            for pattern in error_patterns:
+                error_section += f"- {pattern}\n"
+            error_section += "\n"
+        
+        error_section += """## Instructions for Next Attempt
+Based on the above failed attempts, please:
+1. Carefully analyze all previous errors and their patterns
+2. Avoid repeating any of the mistakes shown above
+3. Pay special attention to the error types and messages
+4. Generate a corrected SQL query that addresses all identified issues
+5. Consider the progression of errors to understand what approaches don't work
+6. If table or column names were wrong, double-check the schema information
+7. If syntax errors occurred, be extra careful with SQL syntax
+
+"""
+        
+        return base_prompt + error_section
+    
+
+    
+    def _get_base_prompt(self, message: ChatMessage) -> str:
+        """获取基础提示词"""
+        # 这里可以根据需要构建基础提示词
+        # 暂时返回一个简单的基础提示
+        return f"""# Text2SQL Task
+
+Convert the following natural language question to SQL:
+
+**Question:** {message.query}
+
+**Database Schema:**
+{message.desc_str}
+
+**Foreign Key Relations:**
+{message.fk_str}
+
+**Evidence:**
+{message.evidence}
+
+"""
+    
+    def _generate_sql_with_error_context(self, message: ChatMessage, enhanced_prompt: str) -> str:
+        """使用错误上下文生成SQL"""
+        try:
+            # 调用LLM服务生成SQL
+            llm_response = llm_service.generate_completion(
+                prompt=enhanced_prompt,
+                temperature=0.1,  # 使用较低的温度以获得更一致的结果
+                max_tokens=self.config.max_tokens
+            )
+            
+            if llm_response.success:
+                sql = llm_service.extract_sql_from_response(llm_response.content)
+                if sql and len(sql.strip()) > 0:
+                    return sql
+            
+            self.logger.warning(f"LLM SQL generation with error context failed: {llm_response.error}")
+            
+        except Exception as e:
+            self.logger.warning(f"Error in SQL generation with error context: {e}")
+        
+        # 后备方案：使用正常的SQL生成流程
+        sub_questions = self._decompose_query(message.query, message.desc_str, message.evidence)
+        context = {}
+        if self.config.enable_rag_enhancement and self.rag_retriever:
+            context = self._retrieve_rag_context(message.query, message.db_id)
+        
+        return self._generate_sql_steps(sub_questions, message.desc_str, message.fk_str, context)
+    
+    def _build_error_aware_qa_pairs(self, message: ChatMessage, error_patterns: List[str]) -> str:
+        """构建包含错误分析的QA对字符串"""
+        qa_parts = []
+        
+        # 添加错误分析信息
+        qa_parts.append("# Error-Aware Query Processing")
+        qa_parts.append(f"Original Query: {message.query}")
+        
+        if error_patterns:
+            qa_parts.append("\n## Identified Error Patterns:")
+            for pattern in error_patterns:
+                qa_parts.append(f"- {pattern}")
+        
+        qa_parts.append(f"\n## Generated SQL (with error context):")
+        qa_parts.append(f"{message.final_sql}")
+        
+        # 添加错误历史摘要
+        if message.error_history:
+            qa_parts.append(f"\n## Previous Attempts Summary:")
+            qa_parts.append(f"Total failed attempts: {len(message.error_history)}")
+            
+            error_types = [record['error_type'] for record in message.error_history]
+            unique_error_types = list(set(error_types))
+            qa_parts.append(f"Error types encountered: {', '.join(unique_error_types)}")
+        
+        qa_parts.append("")
+        
+        return "\n".join(qa_parts)

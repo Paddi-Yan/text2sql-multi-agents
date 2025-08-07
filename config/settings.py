@@ -70,7 +70,15 @@ class DatabaseConfig:
     """Database configuration."""
     
     def __init__(self):
-        self.default_db_type = os.getenv("DEFAULT_DB_TYPE", "sqlite")
+        # MySQL connection settings
+        self.host = os.getenv("DB_HOST", "localhost")
+        self.port = int(os.getenv("DB_PORT", "3306"))
+        self.username = os.getenv("DB_USER", "root")  # 匹配.env中的DB_USER
+        self.password = os.getenv("DB_PASSWORD", "")
+        self.database = os.getenv("DB_NAME", "test")  # 匹配.env中的DB_NAME
+        
+        # General database settings
+        self.default_db_type = os.getenv("DEFAULT_DB_TYPE", "mysql")
         self.connection_timeout = int(os.getenv("DB_CONNECTION_TIMEOUT", "30"))
         self.max_connections = int(os.getenv("DB_MAX_CONNECTIONS", "10"))
         self.connection_retry_attempts = int(os.getenv("DB_RETRY_ATTEMPTS", "3"))

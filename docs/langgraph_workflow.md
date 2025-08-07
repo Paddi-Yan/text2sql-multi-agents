@@ -2,9 +2,18 @@
 
 ## 概述
 
-本文档描述了Text2SQL多智能体系统的LangGraph工作流编排实现。该系统通过状态定义、节点函数和条件路由逻辑，实现了Selector、Decomposer、Refiner三个智能体的协作处理流程。
+本文档描述了Text2SQL多智能体系统的LangGraph工作流编排实现。该系统通过状态定义、节点函数和条件路由逻辑，实现了Selector、Decomposer、Refiner三个智能体的协作处理流程，并集成了LangGraph Memory功能以支持上下文感知的多轮对话。
 
-## 最新更新 (2024-01-08)
+## 最新更新 (2025-01-08)
+
+### LangGraph Memory集成
+
+- **重大更新**: 完整集成了LangGraph Memory功能，支持短期记忆和上下文管理
+- **新增组件**: `LangGraphMemoryManager`类，提供统一的消息历史和错误上下文管理
+- **状态升级**: `Text2SQLState`继承自`MessagesState`，自动支持对话历史管理
+- **Memory支持**: 集成`InMemorySaver`和`InMemoryStore`，支持checkpointer持久化
+- **上下文感知**: 智能体可以访问历史对话、错误上下文和重试信息
+- **OptimizedChatManager**: 新的聊天管理器，完全基于LangGraph工作流编排
 
 ### LangGraph导入修复
 
@@ -16,12 +25,58 @@
 
 ## 核心组件
 
-### 1. 状态定义 (Text2SQLState)
+### 1. LangGraph Memory管理器 (LangGraphMemoryManager)
 
-`Text2SQLState` 是一个TypedDict，定义了工作流中所有必要的状态信息：
+`LangGraphMemoryManager` 是基于LangGraph Memory的上下文管理器，利用LangGraph的内置短期记忆功能管理对话历史和上下文：
 
 ```python
-class Text2SQLState(TypedDict):
+class LangGraphMemoryManager:
+    """基于LangGraph Memory的上下文管理器"""
+    
+    @staticmethod
+    def add_system_message(state: 'Text2SQLState', content: str, 
+                          metadata: Optional[Dict[str, Any]] = None) -> None:
+        """添加系统消息到对话历史"""
+        
+    @staticmethod
+    def add_agent_message(state: 'Text2SQLState', agent_name: str, content: str,
+                         input_data: Optional[Dict[str, Any]] = None,
+                         output_data: Optional[Dict[str, Any]] = None) -> None:
+        """添加智能体消息到对话历史"""
+        
+    @staticmethod
+    def add_error_context_message(state: 'Text2SQLState', error_info: Dict[str, Any]) -> None:
+        """添加错误上下文消息"""
+        
+    @staticmethod
+    def get_conversation_context(state: 'Text2SQLState', 
+                               agent_name: Optional[str] = None,
+                               include_errors: bool = True,
+                               max_messages: int = 20) -> List[Dict[str, Any]]:
+        """获取对话上下文"""
+        
+    @staticmethod
+    def get_error_context_from_messages(state: 'Text2SQLState') -> List[Dict[str, Any]]:
+        """从消息历史中提取错误上下文"""
+        
+    @staticmethod
+    def build_context_aware_prompt(base_prompt: str, state: 'Text2SQLState', 
+                                 agent_name: str) -> str:
+        """构建包含上下文的增强提示词"""
+```
+
+### 2. 状态定义 (Text2SQLState)
+
+`Text2SQLState` 继承自LangGraph的`MessagesState`，利用其内置的短期记忆功能：
+
+```python
+class Text2SQLState(MessagesState):
+    """
+    Text2SQL工作流状态定义
+    
+    继承自LangGraph的MessagesState，利用其内置的短期记忆功能。
+    messages字段自动管理对话历史，支持checkpointer持久化。
+    """
     # 输入信息
     db_id: str                          # 数据库标识符
     query: str                          # 用户自然语言查询
@@ -34,15 +89,38 @@ class Text2SQLState(TypedDict):
     max_retries: int                    # 最大重试次数
     processing_stage: str               # 处理阶段标识
     
-    # 智能体输出
-    extracted_schema: Optional[Dict[str, Any]]  # Selector输出
-    final_sql: str                      # Decomposer输出
-    execution_result: Optional[Dict[str, Any]]  # Refiner输出
+    # Selector智能体输出
+    extracted_schema: Optional[Dict[str, Any]]  # 提取的数据库模式
+    desc_str: str                       # 数据库描述字符串
+    fk_str: str                         # 外键关系字符串
+    pruned: bool                        # 是否进行了模式裁剪
+    chosen_db_schema_dict: Optional[Dict[str, Any]]  # 选择的数据库模式字典
+    
+    # Decomposer智能体输出
+    final_sql: str                      # 生成的SQL语句
+    qa_pairs: str                       # 问答对信息
+    sub_questions: Optional[List[str]]  # 分解的子问题列表
+    decomposition_strategy: str         # 分解策略
+    
+    # Refiner智能体输出
+    execution_result: Optional[Dict[str, Any]]  # SQL执行结果
+    is_correct: bool                    # SQL是否正确
+    error_message: str                  # 错误信息
+    fixed: bool                         # 是否已修正
+    refinement_attempts: int            # 修正尝试次数
+    
+    # 注意：错误历史现在通过LangGraph Messages管理，不再需要单独的字段
     
     # 最终结果
     result: Optional[Dict[str, Any]]    # 最终处理结果
     finished: bool                      # 是否完成处理
     success: bool                       # 是否成功
+    
+    # 元数据和监控
+    start_time: Optional[float]         # 开始处理时间
+    end_time: Optional[float]           # 结束处理时间
+    agent_execution_times: Dict[str, float]  # 各智能体执行时间
+    total_tokens_used: int              # 总token使用量
 ```
 
 ### 2. 节点函数
@@ -96,7 +174,7 @@ def selector_node(state: Text2SQLState) -> Text2SQLState:
 
 #### Decomposer节点 (decomposer_node)
 
-负责查询分解和SQL生成：
+负责查询分解和SQL生成，集成了LangGraph Memory功能：
 
 ```python
 def decomposer_node(state: Text2SQLState) -> Text2SQLState:
@@ -104,43 +182,72 @@ def decomposer_node(state: Text2SQLState) -> Text2SQLState:
     处理查询分解和SQL生成，将复杂查询分解为子问题并生成SQL语句
     """
     # 创建Decomposer智能体实例
-    decomposer = Decomposer(dataset_name="bird")  # 从配置中获取
+    decomposer = DecomposerAgent(
+        agent_name="Decomposer",
+        dataset_name="bird",  # 从配置中获取
+        rag_retriever=enhanced_rag_retriever
+    )
     
-    # 构建消息
-    message = {
-        'db_id': state['db_id'],
-        'query': state['query'],
-        'evidence': state['evidence'],
-        'desc_str': state['desc_str'],
-        'fk_str': state['fk_str'],
-        'extracted_schema': state.get('extracted_schema', {}),
-        'send_to': 'Decomposer'
-    }
+    # 添加Decomposer处理开始的消息
+    LangGraphMemoryManager.add_agent_message(
+        state,
+        "Decomposer",
+        f"Starting SQL generation for query: {state['query']}",
+        input_data={
+            'db_id': state['db_id'],
+            'query': state['query'],
+            'evidence': state['evidence'],
+            'desc_str': state['desc_str'][:100] + '...' if len(state['desc_str']) > 100 else state['desc_str'],
+            'retry_count': state['retry_count']
+        }
+    )
+    
+    # 构建消息，包含错误历史
+    message = ChatMessage(
+        db_id=state['db_id'],
+        query=state['query'],
+        evidence=state['evidence'],
+        desc_str=state['desc_str'],
+        fk_str=state['fk_str'],
+        extracted_schema=state.get('extracted_schema', {}),
+        # 从LangGraph Messages中获取错误历史
+        error_history=LangGraphMemoryManager.get_error_context_from_messages(state),
+        error_context_available=len(LangGraphMemoryManager.get_error_context_from_messages(state)) > 0,
+        send_to='Decomposer'
+    )
     
     # 调用Decomposer智能体
-    result = decomposer.talk(message)
+    response = decomposer.talk(message)
     
     # 更新状态，包含执行时间监控
     execution_time = time.time() - start_time
-    state.update({
-        'final_sql': result.get('final_sql', ''),
-        'qa_pairs': result.get('qa_pairs', ''),
-        'sub_questions': result.get('sub_questions', []),
-        'decomposition_strategy': result.get('decomposition_strategy', 'simple'),
-        'current_agent': 'Refiner',
-        'processing_stage': 'sql_generation_completed',
-        'agent_execution_times': {
-            **state.get('agent_execution_times', {}),
-            'decomposer': execution_time
-        }
-    })
+    if response.success:
+        result_message = response.message
+        state.update({
+            'final_sql': result_message.final_sql,
+            'qa_pairs': result_message.qa_pairs,
+            'sub_questions': result_message.get_context('sub_questions', []),
+            'decomposition_strategy': result_message.get_context('decomposition_strategy', 'simple'),
+            'current_agent': 'Refiner',
+            'processing_stage': 'sql_generation_completed',
+            'agent_execution_times': {
+                **state.get('agent_execution_times', {}),
+                'decomposer': execution_time
+            }
+        })
+    else:
+        state.update({
+            'error_message': f"Decomposer执行失败: {response.error}",
+            'current_agent': 'Error',
+            'processing_stage': 'decomposer_failed'
+        })
     
     return state
 ```
 
 #### Refiner节点 (refiner_node)
 
-负责SQL执行验证和错误修正：
+负责SQL执行验证和错误修正，集成了LangGraph Memory的错误上下文管理：
 
 ```python
 def refiner_node(state: Text2SQLState) -> Text2SQLState:
@@ -148,44 +255,74 @@ def refiner_node(state: Text2SQLState) -> Text2SQLState:
     处理SQL执行验证和错误修正，确保生成的SQL正确可执行
     """
     # 创建Refiner智能体实例
-    refiner = Refiner(
+    from storage.mysql_adapter import MySQLAdapter
+    mysql_adapter = MySQLAdapter()
+    
+    refiner = RefinerAgent(
         data_path="data",  # 从配置中获取
-        dataset_name="bird"  # 从配置中获取
+        dataset_name="bird",  # 从配置中获取
+        mysql_adapter=mysql_adapter
     )
     
     # 构建消息
-    message = {
-        'db_id': state['db_id'],
-        'query': state['query'],
-        'final_sql': state['final_sql'],
-        'desc_str': state['desc_str'],
-        'fk_str': state['fk_str'],
-        'send_to': 'Refiner'
-    }
+    message = ChatMessage(
+        db_id=state['db_id'],
+        query=state['query'],
+        final_sql=state['final_sql'],
+        desc_str=state['desc_str'],
+        fk_str=state['fk_str'],
+        send_to='Refiner'
+    )
     
     # 调用Refiner智能体
-    result = refiner.talk(message)
+    response = refiner.talk(message)
     
     # 更新状态，包含执行时间监控和重试逻辑
     execution_time = time.time() - start_time
-    execution_result = result.get('execution_result', {})
-    is_successful = execution_result.get('is_successful', False)
-    
-    state.update({
-        'execution_result': execution_result,
-        'is_correct': is_successful,
-        'error_message': execution_result.get('sqlite_error', ''),
-        'fixed': result.get('fixed', False),
-        'refinement_attempts': state.get('refinement_attempts', 0) + 1,
-        'processing_stage': 'sql_validation_completed',
-        'agent_execution_times': {
-            **state.get('agent_execution_times', {}),
-            'refiner': execution_time
-        }
-    })
+    if response.success:
+        result_message = response.message
+        execution_result = result_message.execution_result or {}
+        is_successful = execution_result.get('is_successful', False)
+        
+        state.update({
+            'execution_result': execution_result,
+            'is_correct': is_successful,
+            'error_message': execution_result.get('sqlite_error', ''),
+            'fixed': result_message.fixed,
+            'refinement_attempts': state.get('refinement_attempts', 0) + 1,
+            'processing_stage': 'sql_validation_completed',
+            'agent_execution_times': {
+                **state.get('agent_execution_times', {}),
+                'refiner': execution_time
+            }
+        })
+    else:
+        execution_result = {}
+        is_successful = False
+        state.update({
+            'execution_result': execution_result,
+            'is_correct': is_successful,
+            'error_message': f"Refiner执行失败: {response.error}",
+            'fixed': False,
+            'refinement_attempts': state.get('refinement_attempts', 0) + 1,
+            'processing_stage': 'refiner_failed',
+            'agent_execution_times': {
+                **state.get('agent_execution_times', {}),
+                'refiner': execution_time
+            }
+        })
     
     # 如果SQL执行成功，标记为完成
     if is_successful:
+        # 添加成功消息到对话历史
+        LangGraphMemoryManager.add_agent_message(
+            state, 
+            "Refiner", 
+            f"SQL execution successful: {state['final_sql']}",
+            input_data={'sql': state['final_sql']},
+            output_data=execution_result
+        )
+        
         state.update({
             'finished': True,
             'success': True,
@@ -199,11 +336,33 @@ def refiner_node(state: Text2SQLState) -> Text2SQLState:
     else:
         # 如果需要重试且未超过最大重试次数
         if state['retry_count'] < state['max_retries']:
+            # 导入错误分类函数
+            from utils.models import classify_error_type
+            
+            # 创建错误记录
+            error_record = {
+                'attempt_number': state['retry_count'] + 1,
+                'failed_sql': state['final_sql'],
+                'error_message': execution_result.get('sqlite_error', ''),
+                'error_type': classify_error_type(execution_result.get('sqlite_error', '')),
+                'timestamp': time.time()
+            }
+            
+            # 添加错误上下文到消息历史（LangGraph Memory）
+            LangGraphMemoryManager.add_error_context_message(state, error_record)
+            
             state.update({
                 'current_agent': 'Decomposer',
                 'processing_stage': 'retry_sql_generation'
             })
         else:
+            # 添加最终失败消息
+            LangGraphMemoryManager.add_system_message(
+                state,
+                f"Maximum retry attempts reached. Final error: {state['error_message']}",
+                {'type': 'final_failure', 'max_retries_reached': True}
+            )
+            
             state.update({
                 'finished': True,
                 'success': False,
@@ -211,7 +370,8 @@ def refiner_node(state: Text2SQLState) -> Text2SQLState:
                 'result': {
                     'error': state['error_message'],
                     'failed_sql': state['final_sql'],
-                    'processing_time': sum(state['agent_execution_times'].values())
+                    'processing_time': sum(state['agent_execution_times'].values()),
+                    'error_history': LangGraphMemoryManager.get_error_context_from_messages(state)
                 }
             })
     

@@ -35,6 +35,16 @@ class TrainingData:
 
 
 @dataclass
+class ErrorRecord:
+    """单次错误记录"""
+    attempt_number: int                 # 尝试次数
+    failed_sql: str                    # 失败的SQL语句
+    error_message: str                 # 错误消息
+    error_type: str                    # 错误类型（语法错误、模式错误、逻辑错误、执行错误）
+    timestamp: float                   # 错误发生时间戳
+
+
+@dataclass
 class ChatMessage:
     """智能体间消息传递的标准格式"""
     db_id: str
@@ -50,6 +60,16 @@ class ChatMessage:
     fixed: bool = False
     execution_result: dict = None
     chosen_db_schema_dict: dict = None
+    
+    # 新增多轮错误历史字段
+    error_history: List[Dict[str, Any]] = field(default_factory=list)  # 错误历史记录
+    error_context_available: bool = False  # 是否有错误上下文可用
+    
+    def get_context(self, key: str, default=None):
+        """获取上下文信息的辅助方法"""
+        if hasattr(self, key):
+            return getattr(self, key)
+        return default
 
 
 @dataclass
@@ -181,3 +201,42 @@ class AgentResponse:
     error: Optional[str] = None
     execution_time: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+def classify_error_type(error_message: str) -> str:
+    """
+    简单的错误类型分类函数
+    
+    Args:
+        error_message: 错误消息
+        
+    Returns:
+        错误类型字符串
+    """
+    if not error_message:
+        return 'unknown_error'
+    
+    error_msg_lower = error_message.lower()
+    
+    # 语法错误
+    syntax_keywords = ['syntax error', 'invalid syntax', 'unexpected token', 'parse error', 'malformed']
+    if any(keyword in error_msg_lower for keyword in syntax_keywords):
+        return 'syntax_error'
+    
+    # 模式错误（表名、列名不存在）
+    schema_keywords = ['no such table', 'no such column', 'ambiguous column', 'unknown table', 'unknown column']
+    if any(keyword in error_msg_lower for keyword in schema_keywords):
+        return 'schema_error'
+    
+    # 逻辑错误（GROUP BY、聚合函数等）
+    logic_keywords = ['group by', 'aggregate', 'having clause', 'must appear in the group by', 'not a group by expression']
+    if any(keyword in error_msg_lower for keyword in logic_keywords):
+        return 'logic_error'
+    
+    # 执行错误（超时、连接等）
+    execution_keywords = ['timeout', 'connection', 'permission denied', 'access denied', 'database locked']
+    if any(keyword in error_msg_lower for keyword in execution_keywords):
+        return 'execution_error'
+    
+    # 默认为执行错误
+    return 'execution_error'

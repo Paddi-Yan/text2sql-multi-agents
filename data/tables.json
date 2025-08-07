@@ -1,0 +1,44 @@
+{
+  "test_db": {
+    "tables": {
+      "users": {
+        "columns": {
+          "id": {
+            "type": "INTEGER",
+            "primary_key": true
+          },
+          "name": {
+            "type": "VARCHAR(100)"
+          },
+          "email": {
+            "type": "VARCHAR(255)"
+          },
+          "created_at": {
+            "type": "TIMESTAMP"
+          }
+        }
+      },
+      "orders": {
+        "columns": {
+          "id": {
+            "type": "INTEGER",
+            "primary_key": true
+          },
+          "user_id": {
+            "type": "INTEGER",
+            "foreign_key": "users.id"
+          },
+          "amount": {
+            "type": "DECIMAL(10,2)"
+          },
+          "status": {
+            "type": "VARCHAR(50)"
+          },
+          "created_at": {
+            "type": "TIMESTAMP"
+          }
+        }
+      }
+    }
+  }
+}
